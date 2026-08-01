@@ -169,6 +169,16 @@ relocated under `com.staticallocationchecker.shaded.asm`. A `-javaagent` jar is 
 system class path with nothing beside it, so it has to be self-contained — and it must not put its
 own copy of ASM where it could collide with the host application's.
 
+## Demos
+
+A runnable scenario per capability lives in [`demo/`](demo) — a standalone build, deliberately not
+part of this one, that consumes the plugin exactly as a real project would:
+
+```bash
+./gradlew -p demo demo                                  # every scenario, findings side by side
+./gradlew -p demo :07-runtime-flight-recorder:run       # the agent, under load
+```
+
 ## Building
 
 ```
