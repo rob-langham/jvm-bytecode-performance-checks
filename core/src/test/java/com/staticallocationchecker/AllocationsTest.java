@@ -2,6 +2,7 @@ package com.staticallocationchecker;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -149,15 +150,30 @@ class AllocationsTest {
     }
 
     @Test
-    void siteKeyJoinsClassMethodLineAndCategory() {
-        assertEquals("com.example.Foo#bar:42:NEW",
-                Allocations.siteKey("com.example.Foo", "bar", 42, AllocationCategory.NEW));
+    void siteKeyJoinsClassMethodLineOffsetAndCategory() {
+        assertEquals("com.example.Foo#bar:42@7:NEW",
+                Allocations.siteKey("com.example.Foo", "bar", 42, 7, AllocationCategory.NEW));
     }
 
     @Test
     void siteKeyRepresentsUnknownLineAsMinusOne() {
-        assertEquals("com.example.Foo#bar:-1:BOXING",
-                Allocations.siteKey("com.example.Foo", "bar", -1, AllocationCategory.BOXING));
+        assertEquals("com.example.Foo#bar:-1@3:BOXING",
+                Allocations.siteKey("com.example.Foo", "bar", -1, 3, AllocationCategory.BOXING));
+    }
+
+    @Test
+    void siteKeyDistinguishesSitesSharingALine() {
+        assertNotEquals(
+                Allocations.siteKey("com.example.Foo", "bar", 42, 7, AllocationCategory.NEW),
+                Allocations.siteKey("com.example.Foo", "bar", 42, 12, AllocationCategory.NEW),
+                "two allocations on one source line are still two sites");
+    }
+
+    @Test
+    void siteKeyDistinguishesSitesWhenNoDebugInformationExists() {
+        assertNotEquals(
+                Allocations.siteKey("com.example.Foo", "bar", -1, 7, AllocationCategory.NEW),
+                Allocations.siteKey("com.example.Foo", "bar", -1, 12, AllocationCategory.NEW));
     }
 
     @Test

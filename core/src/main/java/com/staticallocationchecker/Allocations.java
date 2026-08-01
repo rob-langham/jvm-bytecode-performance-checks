@@ -51,9 +51,24 @@ public final class Allocations {
         }
     }
 
-    /** The stable, human-readable key identifying an allocation site. */
-    public static String siteKey(String binaryClassName, String methodName, int line, AllocationCategory category) {
-        return binaryClassName + "#" + methodName + ":" + line + ":" + category;
+    /**
+     * The stable, human-readable key identifying an allocation site.
+     *
+     * <p>Class, method, line and category alone do not identify a site: two allocations of the same
+     * category can share a source line, and with no debug information every site in a method shares
+     * a line of -1. Collapsing those together would make "one site fired twice" and "two sites fired
+     * once each" indistinguishable, which is the distinction the recorder exists to draw. The
+     * bytecode offset disambiguates them and is stable for a given compiled class.
+     *
+     * @param bytecodeOffset instruction index of the allocation within its method
+     */
+    public static String siteKey(
+            String binaryClassName,
+            String methodName,
+            int line,
+            int bytecodeOffset,
+            AllocationCategory category) {
+        return binaryClassName + "#" + methodName + ":" + line + "@" + bytecodeOffset + ":" + category;
     }
 
     /** Whether {@code internalName} resolves, via {@code loader}, to a subtype of {@link Throwable}. */

@@ -193,16 +193,12 @@ class InstrumentedBytecodeTest {
         loaded.getMethod("first").invoke(target);
 
         assertTrue(recorder.total() > 0, "instrumentation must not depend on debug information");
-        assertTrue(recorder.snapshot().keySet().stream().allMatch(k -> k.contains(":-1:")),
+        assertTrue(recorder.snapshot().keySet().stream().allMatch(k -> k.contains(":-1@")),
                 () -> "unknown lines are encoded as -1: " + recorder.snapshot().keySet());
     }
 
     @Test
-    @Disabled("GAP: the site key is class#method:line:category, so two allocations of the same "
-            + "category on one source line share a key. 'One site fired twice' and 'two sites fired "
-            + "once' become indistinguishable, which is exactly the signal the recorder exists to "
-            + "provide. Without debug info every same-category site in a method collapses into one")
-    void distinguishesTwoAllocationsOnTheSameSourceLine() throws Exception {
+void distinguishesTwoAllocationsOnTheSameSourceLine() throws Exception {
         Class<?> loaded = instrumentAndLoad(ComplexControlFlow.class);
         Object target = loaded.getDeclaredConstructor().newInstance();
 

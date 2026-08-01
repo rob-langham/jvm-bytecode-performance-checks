@@ -166,6 +166,16 @@ public final class AllocationChecker {
             };
             frames = analyzer.analyze(owner.name, method);
         } catch (AnalyzerException e) {
+            // Returning quietly would make an unanalysable warmup method indistinguishable from a
+            // compliant one. Say so instead, so the gap in coverage is visible in the report.
+            findings.add(new Finding(
+                    Finding.Kind.UNANALYZABLE_CALL,
+                    Type.getObjectType(owner.name).getClassName(),
+                    method.name,
+                    method.desc,
+                    -1,
+                    null,
+                    List.of(signature(owner, method))));
             return;
         }
 
@@ -177,9 +187,8 @@ public final class AllocationChecker {
             if ((opcode >= Opcodes.IRETURN && opcode <= Opcodes.RETURN) || opcode == Opcodes.ATHROW) {
                 exits.add(i);
             }
-            if ((opcode == Opcodes.PUTFIELD || opcode == Opcodes.PUTSTATIC) && frames[i] != null) {
-                Frame<SourceValue> frame = frames[i];
-                cachedProducers.addAll(frame.getStack(frame.getStackSize() - 1).insns);
+            if (frames[i] != null) {
+                collectRetained(insn, frames[i], cachedProducers);
             }
         }
 
@@ -204,6 +213,56 @@ public final class AllocationChecker {
                         Finding.Kind.WARMUP_NOT_CACHED, className, method.name, method.desc, line, category, path));
             }
         }
+    }
+
+    /**
+     * Records the instructions whose produced reference this one retains.
+     *
+     * <p>Warmup code caches an object in more ways than a direct field store: it fills a pooled
+     * array, or hands the object to a collection or map already held in a field. All of those keep
+     * the object alive past the method, which is what the contract is really asking about, so all
+     * of them count as cached.
+     */
+    private static void collectRetained(
+            AbstractInsnNode insn, Frame<SourceValue> frame, Set<AbstractInsnNode> retained) {
+        int opcode = insn.getOpcode();
+
+        // The reference is stored straight into a field.
+        if (opcode == Opcodes.PUTFIELD || opcode == Opcodes.PUTSTATIC) {
+            retained.addAll(frame.getStack(frame.getStackSize() - 1).insns);
+            return;
+        }
+
+        // The reference becomes an element of an array. The array itself must still justify
+        // itself separately - it is an allocation too, and gets its own verdict.
+        if (opcode == Opcodes.AASTORE) {
+            retained.addAll(frame.getStack(frame.getStackSize() - 1).insns);
+            return;
+        }
+
+        // The reference is handed to something already reachable from a field: list.add(x),
+        // map.put(k, x), pool.offer(x). The receiver being a field read is what distinguishes
+        // "stored into the object graph" from "passed to a temporary and dropped".
+        if ((opcode == Opcodes.INVOKEVIRTUAL || opcode == Opcodes.INVOKEINTERFACE)
+                && insn instanceof MethodInsnNode call) {
+            int argumentCount = Type.getArgumentTypes(call.desc).length;
+            int receiverIndex = frame.getStackSize() - argumentCount - 1;
+            if (receiverIndex < 0 || !isReadFromAField(frame.getStack(receiverIndex))) {
+                return;
+            }
+            for (int argument = 0; argument < argumentCount; argument++) {
+                retained.addAll(frame.getStack(frame.getStackSize() - 1 - argument).insns);
+            }
+        }
+    }
+
+    /** Whether every instruction that could have produced this value is a field read. */
+    private static boolean isReadFromAField(SourceValue value) {
+        if (value.insns.isEmpty()) {
+            return false;
+        }
+        return value.insns.stream().allMatch(insn ->
+                insn.getOpcode() == Opcodes.GETFIELD || insn.getOpcode() == Opcodes.GETSTATIC);
     }
 
     /** Whether some method exit is reachable from entry without passing through {@code avoid}. */

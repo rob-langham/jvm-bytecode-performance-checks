@@ -16,8 +16,8 @@ import org.junit.jupiter.api.Test;
 /**
  * The guarded-and-cached contract on {@code @AllocationsForWarmup} methods.
  *
- * <p>"Cached" is currently recognised only as a {@code PUTFIELD}/{@code PUTSTATIC} of the allocated
- * reference. The disabled tests below cover the other ways real warmup code retains an object.
+ * <p>"Cached" means the allocated reference is retained past the method: stored into a field,
+ * written into an array, or handed to a collection already reachable from a field.
  */
 class WarmupContractTest {
 
@@ -74,21 +74,16 @@ class WarmupContractTest {
     }
 
     @Test
-    @Disabled("GAP: 'cached' means PUTFIELD/PUTSTATIC only, so an object retained by adding it to a "
-            + "field-held collection is a false positive - object pools are a primary use case")
     void acceptsAllocationRetainedInAFieldHeldCollection() {
         assertFalseFlagged("intoCollection");
     }
 
     @Test
-    @Disabled("GAP: as above, for Map.put")
     void acceptsAllocationRetainedInAFieldHeldMap() {
         assertFalseFlagged("intoMap");
     }
 
     @Test
-    @Disabled("GAP: elements stored into a cached array go through AASTORE, not PUTFIELD, so "
-            + "pre-populating a pool is reported as WARMUP_NOT_CACHED")
     void acceptsElementsStoredIntoACachedArray() {
         List<Finding> arrayFindings = findings(WarmupCaching.class).stream()
                 .filter(f -> f.methodName().equals("intoArrayElements"))

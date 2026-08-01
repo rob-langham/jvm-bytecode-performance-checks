@@ -69,7 +69,9 @@ public final class WarmupInstrumenter {
         Predicate<String> isThrowable = name -> Allocations.isThrowableByReflection(name, resolutionLoader);
         boolean changed = false;
         int line = -1;
-        for (AbstractInsnNode insn : method.instructions.toArray()) {
+        AbstractInsnNode[] original = method.instructions.toArray();
+        for (int offset = 0; offset < original.length; offset++) {
+            AbstractInsnNode insn = original[offset];
             if (insn instanceof LineNumberNode lineNode) {
                 line = lineNode.line;
                 continue;
@@ -78,7 +80,9 @@ public final class WarmupInstrumenter {
             if (category == null) {
                 continue;
             }
-            String key = Allocations.siteKey(binaryClass, method.name, line, category);
+            // The offset is taken from the original instruction list, so it is not perturbed by the
+            // probes this loop inserts and stays comparable to what the static checker would see.
+            String key = Allocations.siteKey(binaryClass, method.name, line, offset, category);
             InsnList probe = new InsnList();
             probe.add(new LdcInsnNode(key));
             probe.add(new MethodInsnNode(
