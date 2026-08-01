@@ -6,163 +6,98 @@ nav_order: 11
 
 # Exceptions
 
-Allocating a `Throwable` is exempt. The exceptional path is not the hot path, and forcing people to
-preallocate exceptions costs them stack traces for no real benefit.
+**Allocating an exception is allowed. The checker deliberately ignores it.**
 
-## The Java
-
-`core/src/test/java/com/staticallocationchecker/fixtures/ExceptionAllocation.java`
-
-```java
-public class ExceptionAllocation {
-
-    /** A user-defined exception, to exercise the index-then-reflection hierarchy climb. */
-    public static class CustomException extends RuntimeException {
-    }
-
-    @ZeroAllocations
-    public void throwsJdkException(boolean fail) {
-        if (fail) {
-            throw new IllegalStateException("bad state");
-        }
-    }
-
-    @ZeroAllocations
-    public void throwsCustomException(boolean fail) {
-        if (fail) {
-            throw new CustomException();
-        }
-    }
-
-    @ZeroAllocations
-    public Object allocatesObject() {
-        return new Object();
-    }
-}
-```
-
-## The bytecode
-
-All three methods contain a `new`. They are not distinguishable by opcode:
-
-```
-  public void throwsJdkException(boolean);
-    Code:
-       0: iload_1
-       1: ifeq          14
-       4: new           #7                  // class java/lang/IllegalStateException
-       7: dup
-       8: ldc           #9                  // String bad state
-      10: invokespecial #11                 // Method java/lang/IllegalStateException."<init>":(Ljava/lang/String;)V
-      13: athrow
-      14: return
-
-  public void throwsCustomException(boolean);
-    Code:
-       0: iload_1
-       1: ifeq          12
-       4: new           #14                 // class com/…/ExceptionAllocation$CustomException
-       7: dup
-       8: invokespecial #16                 // Method com/…/ExceptionAllocation$CustomException."<init>":()V
-      11: athrow
-      12: return
-
-  public java.lang.Object allocatesObject();
-    Code:
-       0: new           #2                  // class java/lang/Object
-       3: dup
-       4: invokespecial #1                  // Method java/lang/Object."<init>":()V
-       7: areturn
-```
-
-The distinction is the *operand*: the class named by the `new`.
-
-## What the checker reports
-
-One finding. Both `throw` sites are exempt:
-
-| Field | Value |
-| --- | --- |
-| `kind` | `ZERO_ALLOCATION_VIOLATION` |
-| `className` | `com.staticallocationchecker.fixtures.ExceptionAllocation` |
-| `methodName` | `allocatesObject` |
-| `line` | `28` |
-| `category` | `NEW` |
+`new IllegalStateException(...)` is an allocation like any other, and it is exempt — the only
+exemption in the tool.
 
 ## Why
 
-The `NEW` case tests the allocated type before classifying:
+Because the exceptional path is not the hot path. If you are throwing, the request has already
+failed; one allocation is not what you should be worrying about.
 
-```java
-case Opcodes.NEW:
-    return isThrowableType.test(((TypeInsnNode) insn).desc) ? null : AllocationCategory.NEW;
-```
-
-`AllocationChecker.isThrowable` climbs the supertype chain in two stages:
-
-```java
-private boolean isThrowable(String internalName, Map<String, ClassNode> index) {
-    String current = internalName;
-    while (current != null) {
-        if (current.equals("java/lang/Throwable")) {
-            return true;
-        }
-        if (current.equals("java/lang/Object")) {
-            return false;
-        }
-        ClassNode node = index.get(current);
-        if (node != null) {
-            current = node.superName;                        // in the roots: read superName
-        } else {
-            return Allocations.isThrowableByReflection(      // outside: ask the classloader
-                    current, getClass().getClassLoader());
-        }
-    }
-    return false;
-}
-```
-
-That is what the two fixtures exercise:
-
-- **`CustomException`** *is* in the analysis roots, so the loop reads its `superName`
-  (`java/lang/RuntimeException`), which is not — and falls through to reflection.
-- **`IllegalStateException`** is never in the roots, so the first lookup misses and reflection
-  answers immediately.
-
-`isThrowableByReflection` loads the class with `initialize = false` and asks
-`Throwable.class.isAssignableFrom`. It catches `Throwable` and returns `false` on any failure, so a
-type that cannot be loaded is treated as a normal allocation — conservative in the right direction.
-
-## What is *not* exempt
-
-The exemption is narrow: it covers the `new` of a `Throwable` subtype, and nothing else on the line.
+The alternative would be worse. Without the exemption, satisfying the checker would mean
+preallocating exception instances as constants — and a preallocated exception carries the stack
+trace from wherever it was first created, which is useless and actively misleading during an
+incident. Forcing that trade on people to satisfy a static check would be a bad bargain.
 
 ```java
 @ZeroAllocations
-public void validate(long id) {
-    if (id < 0) {
-        throw new IllegalStateException("bad id " + id);
-        //        ^ exempt (NEW of a Throwable)
-        //                                   ^ NOT exempt: STRING_CONCAT allocates a String
+public void validate(boolean fail) {
+    if (fail) {
+        throw new IllegalStateException("bad state");   // no finding
     }
 }
 ```
 
-Also not exempt:
+The exemption applies to any subtype of `Throwable`, including your own:
 
-- **Arrays of throwables.** `new IllegalStateException[4]` is `NEW_ARRAY`; there is no exemption
-  path for the array opcodes, and an array is not something you throw.
-- **Anything the constructor does.** The checker does not descend into `<init>` (see
-  [direct `new`](direct-new.md#why)), so a constructor that allocates internally is invisible here —
-  which cuts both ways.
-- **Suppression and cause chains built on the hot path.**
+```java
+public static class CustomException extends RuntimeException {
+}
 
-## A note on the cost you are exempting
+@ZeroAllocations
+public void validate(boolean fail) {
+    if (fail) {
+        throw new CustomException();                    // no finding
+    }
+}
+```
 
-`fillInStackTrace` — which runs in `Throwable`'s constructor — is usually far more expensive than
-the allocation it accompanies, and its cost scales with stack depth. The exemption exists because
-exceptions should not be on the hot path at all, not because throwing is cheap.
+The checker works out whether a type is a `Throwable` by climbing its supertypes — through your own
+code where it can see it, and by asking the classloader when it cannot. A type it cannot resolve at
+all is treated as a normal allocation, which is the safe direction to be wrong in.
 
-If you find an exception being thrown *and caught* inside a zero-allocation path as flow control,
-the checker will say nothing, and it is still the most expensive thing in the method. Overriding
-`fillInStackTrace` to return `this` is the usual remedy, at the cost of the trace.
+## What is *not* exempt
+
+The exemption is narrow: it covers the `new` of a `Throwable`, and nothing else on the line.
+
+**The message.** This is the one people hit:
+
+```java
+throw new IllegalStateException("bad id " + id);
+//        ^^^^^^^^^^^^^^^^^^^^^ exempt
+//                              ^^^^^^^^^^^^^^ NOT exempt — STRING_CONCAT
+```
+
+A constant message is free; a built one is an allocation. See
+[string concatenation](string-concat.md).
+
+**Arrays of throwables.** `new IllegalStateException[4]` is a normal `NEW_ARRAY`. The exemption is
+for throwing, and an array is not something you throw.
+
+**Anything else on the line** — a boxed value in the message, a varargs array from
+`String.format`.
+
+## What the exemption is not telling you
+
+**Throwing is not cheap.** The expensive part of an exception is not the allocation at all; it is
+`fillInStackTrace()`, which runs inside `Throwable`'s constructor and walks the entire call stack.
+Its cost scales with stack depth and typically dwarfs the allocation.
+
+So the exemption exists because exceptions *should not be on the hot path*, not because they are
+free when they are.
+
+If you are using exceptions as control flow inside a zero-allocation method — throwing and catching
+them in normal operation — the checker will say nothing, and it will still be the most expensive
+thing in the method. The usual remedy is a custom exception overriding `fillInStackTrace()` to
+return `this`, trading the stack trace for speed. That is a decision to take deliberately, not to
+back into.
+
+**Constructors are not walked.** The checker does not descend into `<init>`, so whatever your
+exception's constructor does — building a message, capturing context, allocating a details object —
+is invisible here.
+
+## What the checker reports
+
+From `core/src/test/java/com/staticallocationchecker/fixtures/ExceptionAllocation.java`, which has
+three methods that all contain a `new`:
+
+| `methodName` | Allocates | Reported |
+| --- | --- | --- |
+| `throwsJdkException` | `new IllegalStateException("bad state")` | **No** — exempt |
+| `throwsCustomException` | `new CustomException()` | **No** — exempt |
+| `allocatesObject` | `new Object()` | **Yes**, line 28, `NEW` |
+
+One finding from three `new` instructions. The opcode is identical in all three cases — what
+differs is the type being allocated.

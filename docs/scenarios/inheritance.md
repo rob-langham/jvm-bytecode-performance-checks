@@ -6,131 +6,59 @@ nav_order: 9
 
 # Inheritance
 
-The other half of resolution: the method that runs is declared in a **supertype** of the type named
-at the call site.
+**The method that runs may not be declared on the type you called it on — and the contract you
+declared may not be on the method that runs.**
 
-## The Java
+Two separate things travel up and down a class hierarchy, and the checker follows both:
 
-`core/src/test/java/com/staticallocationchecker/fixtures/Inheritance.java`
+- **the code**, when a subclass inherits a method it does not redeclare;
+- **the contract**, when a subclass overrides a method that was annotated in the supertype.
+
+## Finding the code
 
 ```java
-public class Inheritance {
-
-    public static class AllocatingParent {
-        Object inherited() {
-            return new Object();
-        }
+public static class AllocatingParent {
+    Object inherited() {
+        return new Object();
     }
+}
 
-    /** Inherits {@code inherited()} without redeclaring it. */
-    public static class AllocatingChild extends AllocatingParent {
-    }
+/** Inherits inherited() without redeclaring it. */
+public static class AllocatingChild extends AllocatingParent {
+}
 
-    public static class CleanParent {
-        int inheritedClean() {
-            return 42;
-        }
-    }
-
-    public static class CleanChild extends CleanParent {
-    }
-
-    private final AllocatingChild allocating = new AllocatingChild();
-    private final CleanChild clean = new CleanChild();
-
-    @ZeroAllocations
-    public Object callsInheritedAllocatingMethod() {
-        return allocating.inherited();
-    }
-
-    @ZeroAllocations
-    public int callsInheritedCleanMethod() {
-        return clean.inheritedClean();
-    }
+@ZeroAllocations
+public Object callsInheritedAllocatingMethod() {
+    return allocating.inherited();     // called on the child
 }
 ```
 
-`AllocatingChild` is an empty class. `AllocatingChild.class` contains no `inherited` method at all.
+`AllocatingChild.class` contains no `inherited` method at all — the compiled class is empty. A
+checker that looked only at the type named at the call site would find nothing and report the path
+as clean.
 
-## The bytecode
-
-The call site names the child:
-
-```
-  public java.lang.Object callsInheritedAllocatingMethod();
-    Code:
-       0: aload_0
-       1: getfield      // Field allocating:L…/Inheritance$AllocatingChild;
-       4: invokevirtual // Method …/Inheritance$AllocatingChild.inherited:()Ljava/lang/Object;
-       7: areturn
-```
-
-Looking for `inherited` in `AllocatingChild` finds nothing — a naive resolver would stop there and
-report the path as clean.
-
-## What the checker reports
-
-One finding, attributed to the **parent**, where the bytecode actually lives:
+Instead the finding is attributed to the parent, where the code actually lives:
 
 | Field | Value |
 | --- | --- |
-| `kind` | `ZERO_ALLOCATION_VIOLATION` |
-| `className` | `com.staticallocationchecker.fixtures.Inheritance$AllocatingParent` |
-| `methodName` / `methodDescriptor` | `inherited` `()Ljava/lang/Object;` |
+| `className` | `…Inheritance$AllocatingParent` |
+| `methodName` | `inherited` |
 | `line` | `11` |
 | `category` | `NEW` |
-| `callPath` | `…Inheritance#callsInheritedAllocatingMethod()…` → `…$AllocatingParent#inherited()…` |
+| `callPath` | `Inheritance#callsInheritedAllocatingMethod()` → `AllocatingParent#inherited()` |
 
-`callsInheritedCleanMethod` reports nothing — resolution succeeded, the parent's body was walked,
-and it allocates nothing.
+The lookup climbs the superclass chain, then searches interfaces — matching the JVM's own
+resolution order, and catching `default` methods, which live on an interface rather than on the
+superclass chain.
 
-## Why
+A companion fixture, `callsInheritedCleanMethod`, reports nothing: resolution succeeded, the
+parent's body was walked, and it does not allocate. Silence here means "checked and clean", not
+"not found" — the difference between the two is what
+[unanalyzable calls](unanalyzable-calls.md) exist to make visible.
 
-`ClassHierarchy.declaredMethod` climbs the superclass chain before giving up:
+## Inheriting the contract
 
-```java
-private MethodRef declaredMethod(String owner, String name, String descriptor) {
-    ClassNode current = index.get(owner);
-    while (current != null) {
-        MethodNode declared = findDeclared(current, name, descriptor);
-        if (declared != null) {
-            return new MethodRef(current, declared);
-        }
-        current = current.superName == null ? null : index.get(current.superName);
-    }
-    // Default methods are declared on an interface, which is not on the superclass chain.
-    return interfaceMethod(owner, name, descriptor, new LinkedHashSet<>());
-}
-```
-
-Two paths, matching the JVM's own resolution order:
-
-1. **Superclass chain.** Walk up `superName` until the method is found.
-2. **Interfaces.** If no superclass declares it, search the interface graph — because a `default`
-   method lives on an interface, which is not on the superclass chain. `interfaceMethod` recurses
-   through each interface's own super-interfaces, and carries a `visited` set so a diamond does not
-   loop.
-
-The climb stops at the edge of the index. `AllocatingParent extends Object`, and `java/lang/Object`
-is not in the analysis roots, so the loop ends there — which is fine, because the method was found
-before then. When it is *not* found, the result is empty and the caller reports
-[`UNANALYZABLE_CALL`](unanalyzable-calls.md).
-
-## Inheriting and overriding at once
-
-Resolution collects into a `LinkedHashSet<MethodRef>`, and `MethodRef.equals` compares
-owner-name, method-name and descriptor. So for a call on `AllocatingChild`:
-
-- `declaredMethod` climbs and yields `AllocatingParent#inherited`;
-- `overridesOf` scans for indexed subtypes of `AllocatingChild` declaring a body — there are none.
-
-One target, one walk, one finding. If `AllocatingChild` *had* overridden `inherited`, both bodies
-would be targets and both would be walked, because either could execute depending on the runtime
-type at the call site.
-
-## The gap: annotations are not inherited
-
-The converse case does **not** work, and this is a known gap:
+An override does **not** have to repeat the annotation. The contract is inherited:
 
 ```java
 public static class AnnotatedParent {
@@ -140,17 +68,76 @@ public static class AnnotatedParent {
     }
 }
 
+/** Overrides an annotated method without repeating the annotation. */
 public static class UnannotatedOverride extends AnnotatedParent {
     @Override
     public Object make() {
-        return new Object();     // reported? No.
+        return new Object();     // reported
     }
 }
 ```
 
-`UnannotatedOverride#make` produces no finding. Entry points are discovered by scanning for
-annotations on the class file, and Java annotations are not inherited by overriding methods — so
-the override silently drops the contract. See
-[annotation semantics](annotation-semantics.md#an-override-does-not-inherit-the-contract).
+| Field | Value |
+| --- | --- |
+| `className` | `…AnnotationSemantics$UnannotatedOverride` |
+| `methodName` | `make` |
+| `line` | `103` |
+| `category` | `NEW` |
 
-Until that is closed, if a type's contract matters, **repeat the annotation on every override**.
+This deliberately departs from Java's own rule, under which annotations are never inherited by
+overriding methods. Following that rule exactly would have made `@ZeroAllocations` on an API almost
+worthless: a base class could declare a contract and every subclass could quietly break it.
+
+**Interfaces work the same way**, which is where it matters most:
+
+```java
+public interface AnnotatedInterface {
+    @ZeroAllocations
+    Object handle();
+}
+
+public static class UnannotatedImplementation implements AnnotatedInterface {
+    @Override
+    public Object handle() {
+        return new Object();     // reported, line 117
+    }
+}
+```
+
+So annotating an interface method is a real contract on every implementation the checker can see.
+That is the natural place to declare "implementations of this must not allocate".
+
+## An override can declare its own contract
+
+A declaration always beats an inherited one, so a subclass can legitimately change the terms:
+
+```java
+public static class OverrideDeclaringItsOwnContract extends AnnotatedParent {
+    private Object cache;
+
+    @Override
+    @AllocationsForWarmup           // this wins over the inherited @ZeroAllocations
+    public Object make() {
+        if (cache == null) {
+            cache = new Object();
+        }
+        return cache;
+    }
+}
+```
+
+No finding: the override is judged against the warmup contract it declares, and satisfies it. The
+inherited `@ZeroAllocations` does not also apply — an explicit choice is never overridden by an
+inherited one.
+
+{: .note }
+> Note this is not the same as putting both annotations on **one** method, which is a contradiction
+> and is reported as [`CONFLICTING_CONTRACTS`](annotation-semantics.md#both-annotations-on-one-method).
+> Here the two contracts are on different methods in a hierarchy, and the more specific one wins.
+
+## In practice
+
+- **Declare the contract once, on the interface or base class.** It propagates.
+- **Expect findings on classes you did not annotate.** The `className` in a finding is where the
+  allocation is; the contract may have been declared several types above it.
+- **Use an override's own annotation to narrow the terms deliberately**, not by accident.

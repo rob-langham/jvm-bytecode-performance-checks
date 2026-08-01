@@ -6,85 +6,38 @@ nav_order: 4
 
 # String concatenation
 
-`a + b` on strings is an `invokedynamic` in modern Java, and it allocates.
+**Joining strings with `+` builds a new `String`, and a `String` is an object.**
 
-## The Java
+Strings are immutable, so there is no such thing as appending to one. `a + b` cannot modify `a`; it
+has to produce a third string containing both. That third string is the allocation.
 
-`core/src/test/java/com/staticallocationchecker/fixtures/StringConcatenation.java`
-
-```java
-public class StringConcatenation {
-
-    @ZeroAllocations
-    public String concat(String a, int b) {
-        return a + b;
-    }
-}
-```
-
-## The bytecode
-
-```
-  public java.lang.String concat(java.lang.String, int);
-    Code:
-       0: aload_1
-       1: iload_2
-       2: invokedynamic #7,  0              // InvokeDynamic #0:makeConcatWithConstants:(Ljava/lang/String;I)Ljava/lang/String;
-       7: areturn
-```
-
-Since Java 9 ([JEP 280](https://openjdk.org/jeps/280)) `javac` compiles string concatenation to a
-single `invokedynamic` whose bootstrap method is `StringConcatFactory.makeConcatWithConstants`. The
-JVM links it at first execution to a `MethodHandle` chain that does the work.
-
-{: .note }
-> On Java 8 the same source compiled to `new StringBuilder(); append(); append(); toString()` —
-> which this checker would report as [`NEW`](direct-new.md) plus a string of unresolvable calls. The
-> indy form is both faster and easier to recognise, and it is what you will see on any supported JDK.
-
-Note what the descriptor tells you: `(Ljava/lang/String;I)Ljava/lang/String;` — the `int` is passed
-as an `int`. Indified concatenation does *not* box its primitive arguments, so this is one
-allocation, not two.
-
-## What the checker reports
-
-| Field | Value |
-| --- | --- |
-| `kind` | `ZERO_ALLOCATION_VIOLATION` |
-| `className` | `com.staticallocationchecker.fixtures.StringConcatenation` |
-| `methodName` / `methodDescriptor` | `concat` `(Ljava/lang/String;I)Ljava/lang/String;` |
-| `line` | `10` |
-| `category` | `STRING_CONCAT` |
-
-## Why
-
-The check is on the bootstrap method's owner, not on the call site's name:
+## Why it is unavoidable
 
 ```java
-private static final String STRING_CONCAT_FACTORY = "java/lang/invoke/StringConcatFactory";
-
-if (STRING_CONCAT_FACTORY.equals(indy.bsm.getOwner())) {
-    return AllocationCategory.STRING_CONCAT;
-}
+String greeting = "hello ";
+String message = greeting + name;   // greeting is unchanged. A new String now exists.
 ```
 
-`makeConcatWithConstants` produces a new `String`, and a `String` is an object. There is no
-interning path that would let the checker prove otherwise for a runtime-computed value.
+Immutability is the reason. If strings could be modified in place, `+` could be free; because they
+cannot, every `+` on a runtime value produces a new object.
+
+The exception is when the compiler can do the work at compile time. `"a" + "b"` where both sides
+are constants becomes the single constant `"ab"` in the class file, with no runtime allocation at
+all — so constant folding is free, and only concatenation involving a *variable* costs anything.
 
 ## Where it hides
 
-**In logging that is switched off.** This is the classic:
+**In logging — even logging that is switched off.** This is the classic:
 
 ```java
 @ZeroAllocations
 public void onTick(long id) {
-    log.debug("tick " + id);    // allocates whether or not DEBUG is enabled
+    log.debug("tick " + id);     // the String is built BEFORE debug() is called
 }
 ```
 
-The concatenation is evaluated to produce the argument, *then* `debug` decides to throw it away.
-Parameterised logging fixes the concatenation but introduces [a varargs array](varargs.md) instead;
-the only allocation-free answer on a hot path is a guard:
+Java evaluates arguments before the call. The string is constructed, then `debug` decides the level
+is disabled and throws it away. Guarding it helps at runtime:
 
 ```java
 if (log.isDebugEnabled()) {
@@ -92,22 +45,102 @@ if (log.isDebugEnabled()) {
 }
 ```
 
-which moves the allocation onto a path that a production configuration does not take. Note that the
-static checker will **still report it** — it reports every reachable site, and `isDebugEnabled()`
-being false is a runtime property. On a genuinely zero-allocation path, do not log.
+but the checker will **still report it**, because it reports every reachable allocation and cannot
+know your production log level. On a genuinely zero-allocation path, do not log.
 
-**In exception messages.** `throw new IllegalStateException("bad id " + id)` allocates the
-[exception (exempt)](exceptions.md) and the message `String` (**not** exempt — the exemption is for
-`Throwable` subtypes, and `String` is not one).
+**In exception messages.**
 
-**In `toString()`, `String.format`, and string switches on computed values.**
+```java
+throw new IllegalStateException("bad id " + id);
+//        ^ exempt: allocating a Throwable is allowed
+//                                     ^ NOT exempt: the message String is a normal allocation
+```
+
+The [exception exemption](exceptions.md) covers the exception, not everything on the line.
+
+**In `toString()`**, which is easy to call by accident — string concatenation of any non-`String`
+object calls it, and most implementations concatenate internally.
 
 ## Fixing it
 
-- Do not build strings on the hot path. Emit binary or fixed-layout records and format them
-  off-path.
-- For diagnostics, write into a reusable `StringBuilder` or byte buffer held in a field, behind a
-  [warmup boundary](warmup-contract.md).
-- For exception messages on a path that must not allocate, throw a preallocated exception with a
-  constant message — but note the trade-off, since a preallocated `Throwable` carries a stale stack
-  trace.
+**Do not build strings on the hot path.** Emit binary or fixed-layout records and format them
+off-path, where allocation does not matter.
+
+**Reuse a buffer** for the cases where you must produce text:
+
+```java
+private StringBuilder scratch;
+
+@AllocationsForWarmup
+StringBuilder scratch() {
+    if (scratch == null) {
+        scratch = new StringBuilder(256);
+    }
+    return scratch;
+}
+
+@ZeroAllocations
+public void render(long id) {
+    StringBuilder out = scratch();
+    out.setLength(0);        // reuse, do not reallocate
+    out.append("tick ").append(id);
+}
+```
+
+Note that this only pays off if you consume the buffer without calling `toString()`, which would
+allocate the very string you were avoiding.
+
+**For exception messages on a hot path**, use a constant message. A preallocated exception is an
+option, at the cost of a stale stack trace.
+
+## What the checker reports
+
+From `core/src/test/java/com/staticallocationchecker/fixtures/StringConcatenation.java`:
+
+```java
+@ZeroAllocations
+public String concat(String a, int b) {
+    return a + b;
+}
+```
+
+| Field | Value |
+| --- | --- |
+| `kind` | `ZERO_ALLOCATION_VIOLATION` |
+| `className` | `com.staticallocationchecker.fixtures.StringConcatenation` |
+| `methodName` | `concat` |
+| `line` | `10` |
+| `category` | `STRING_CONCAT` |
+
+One finding, not two. Note that `b` is an `int` being joined to a `String` and is **not** boxed —
+see below.
+
+## In the bytecode
+
+{: .note }
+> Optional.
+
+Since Java 9, `javac` compiles concatenation to a single `invokedynamic` that hands the pieces to
+the JVM, which assembles an optimised routine on first use:
+
+```
+  public String concat(String a, int b);                   stack after      locals
+       0: aload_1                                          [a]              0=this 1=a 2=b
+       1: iload_2                                          [a, 5]           ^ a raw int, not
+                                                                              an Integer
+       2: invokedynamic makeConcatWithConstants            [String]
+                        :(Ljava/lang/String;I)Ljava/lang/String;
+                        ^^ pops both pieces, pushes ONE new String
+       7: areturn                                          []
+```
+
+The descriptor `(Ljava/lang/String;I)` is worth reading: the `I` means the `int` is passed as a raw
+`int`. Indified concatenation does not box its primitives, so this line is one allocation, not two.
+
+The checker recognises it by the bootstrap method's owner being `StringConcatFactory`, rather than
+by the call site's name.
+
+{: .note }
+> On Java 8 the same source compiled to `new StringBuilder()`, two `append` calls and a
+> `toString()` — which this checker would report as a [`NEW`](direct-new.md) plus a string of
+> unresolvable calls. The `invokedynamic` form is both faster and easier to recognise.

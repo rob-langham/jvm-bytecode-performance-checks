@@ -40,13 +40,14 @@ build already produces.
 `@ZeroAllocations` marks a method (or a whole type) as being on a hot path. The checker walks it
 and every method it calls transitively, reporting each allocation site it reaches:
 
-| Category | Source that produces it |
+| Category | What produces it |
 | --- | --- |
 | [`NEW`](scenarios/direct-new.md) | `new Foo()` |
-| [`NEW_ARRAY`](scenarios/arrays.md) | `new int[8]`, and the [implicit varargs array](scenarios/varargs.md) |
-| [`BOXING`](scenarios/autoboxing.md) | `Integer.valueOf(i)`, autoboxing into a collection |
-| [`STRING_CONCAT`](scenarios/string-concat.md) | `"a" + b` |
-| [`LAMBDA`](scenarios/lambdas.md) | a *capturing* lambda or method reference |
+| [`NEW_ARRAY`](scenarios/arrays.md) | `new int[8]` |
+| [`BOXING`](scenarios/autoboxing.md) | a primitive becoming an object — any `int` reaching a generic API |
+| [`STRING_CONCAT`](scenarios/string-concat.md) | `"a" + b`, because strings are immutable |
+| [`VARARGS_ARRAY`](scenarios/varargs.md) | the array the compiler builds at a varargs call site |
+| [`LAMBDA`](scenarios/lambdas.md) | a lambda that *captures* something, rebuilt on every evaluation |
 
 `@AllocationsForWarmup` marks the place where allocation is allowed — the lazy-init of a buffer or
 a cache — but only under a contract: each allocation must be **guarded** by a branch and **cached**
@@ -103,12 +104,16 @@ Both classes pass the static check. Only one of them actually reaches a steady s
 
 - [Setup Guide](setup.md) — get it running against your build.
 - [Usage and best practices](usage.md) — where to put the annotations, and how to live with the results.
-- [Allocation scenarios](scenarios/) — one page per thing that allocates: the Java, the bytecode it
-  compiles to, what the checker reports, and why.
+- [Allocation scenarios](scenarios/) — one page per thing that allocates: why it happens, where it
+  shows up in real code, and how to avoid it.
 - [Warmup under load](runtime/steady-state.md) — the runtime recorder, and proving steady state.
+
+If you only read one page, read [autoboxing](scenarios/autoboxing.md) — it is the allocation most
+often sitting on a hot path that nobody has noticed, and it is worth knowing about whether or not
+you ever run this tool.
 
 ## Status
 
 Early — `0.1.0-SNAPSHOT`, nothing published to an artifact repository yet. See
 [Setup](setup.md#consuming-the-project-today) for how to consume it in the meantime, and
-[Known gaps](usage.md#known-gaps) for what it does not do.
+[Known gaps](usage.md#known-gaps) for the remaining limitations.

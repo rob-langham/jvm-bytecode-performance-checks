@@ -6,59 +6,58 @@ has_children: true
 
 # Allocation Scenarios
 
-One page per thing that can put an object on the heap, and per rule that decides what happens next.
-Each page shows the same four things:
+One page per thing that puts an object on the heap, and per rule that decides what happens next.
 
-1. **The Java** — what it looks like in source.
-2. **The bytecode** — what `javac` actually emitted, from `javap -c`.
-3. **What the checker reports** — the real finding, field by field.
-4. **Why** — the rule in [`Allocations.categoryOf`](https://github.com/rob-langham/jvm-bytecode-performance-checks/blob/main/core/src/main/java/com/staticallocationchecker/Allocations.java)
-   or [`AllocationChecker`](https://github.com/rob-langham/jvm-bytecode-performance-checks/blob/main/core/src/main/java/com/staticallocationchecker/AllocationChecker.java)
-   that produced it, and what to do about it.
+Each page leads with **why** the allocation happens — in Java terms, not bytecode terms — then where
+it shows up in real code, then how to avoid it. The finding the checker produces comes near the end,
+and the bytecode after that, marked optional. You should never need to read a disassembly to
+understand what the tool is telling you.
 
-Everything on these pages is generated from the fixtures in
-`core/src/test/java/com/staticallocationchecker/fixtures/`, which are the same classes the test
-suite asserts against. Nothing here is illustrative — if a page shows a finding, that is the
-finding the tool produces. See [Regenerating these pages](regenerating.md).
+## Allocations with a `new` you can see
 
-## The allocating instructions
-
-| Scenario | Category | The bytecode that gives it away |
+| Page | Category | Short version |
 | --- | --- | --- |
-| [Direct `new`](direct-new.md) | `NEW` | `new` |
-| [Arrays](arrays.md) | `NEW_ARRAY` | `newarray`, `anewarray`, `multianewarray` |
-| [Autoboxing](autoboxing.md) | `BOXING` | `invokestatic Integer.valueOf` and friends |
-| [String concatenation](string-concat.md) | `STRING_CONCAT` | `invokedynamic` bootstrapped by `StringConcatFactory` |
-| [Lambdas](lambdas.md) | `LAMBDA` | `invokedynamic` bootstrapped by `LambdaMetafactory`, *with captured arguments* |
-| [Varargs](varargs.md) | `NEW_ARRAY` | an `anewarray`/`newarray` you did not write |
+| [Direct `new`](direct-new.md) | `NEW` | You wrote `new`. One finding per site; constructors are not descended into. |
+| [Arrays](arrays.md) | `NEW_ARRAY` | Arrays are objects, and the JVM zeroes them for you. |
 
-## How the walk reaches them
+## Allocations with no `new` at all
 
-| Scenario | What it demonstrates |
+These are the ones worth reading even if you never run the tool.
+
+| Page | Category | Short version |
+| --- | --- | --- |
+| [Autoboxing](autoboxing.md) | `BOXING` | A primitive becoming an object. Any primitive meeting a generic API. |
+| [String concatenation](string-concat.md) | `STRING_CONCAT` | Strings are immutable, so `+` must build a new one. |
+| [Lambdas](lambdas.md) | `LAMBDA` | A lambda that captures anything is built fresh every time. |
+| [Varargs](varargs.md) | `VARARGS_ARRAY` | The compiler builds an array at the call site, on your hot path. |
+
+## How the checker reaches them
+
+| Page | Short version |
 | --- | --- |
-| [Transitive calls](transitive-calls.md) | The annotated method allocates nothing; a helper does |
-| [Virtual dispatch](virtual-dispatch.md) | Resolution follows the call to every reachable implementation |
-| [Inheritance](inheritance.md) | A method inherited rather than declared on the receiver's type |
-| [Recursion](recursion.md) | The walk terminates, and reports once |
-| [Shared helpers](transitive-calls.md#one-helper-two-entry-points) | One helper, two entry points, two findings |
+| [Transitive calls](transitive-calls.md) | The contract covers everything the method calls, not just the method. |
+| [Virtual dispatch](virtual-dispatch.md) | An interface call is checked against every implementation it can see. |
+| [Inheritance](inheritance.md) | Both the code and the contract travel through a class hierarchy. |
+| [Recursion](recursion.md) | Cycles terminate; each site is reported once. |
 
-## What is exempt, and what is refused
+## What is allowed, and what is refused
 
-| Scenario | Outcome |
+| Page | Short version |
 | --- | --- |
-| [Exceptions](exceptions.md) | Allocating a `Throwable` is exempt |
-| [Unanalyzable calls](unanalyzable-calls.md) | A call resolving to nothing is flagged, not assumed clean |
+| [Exceptions](exceptions.md) | Allocating a `Throwable` is exempt. The message is not. |
+| [Unanalyzable calls](unanalyzable-calls.md) | "I could not check this" — not "this allocates". |
 
-## The warmup contract
+## Allocating on purpose
 
-| Scenario | What it covers |
+| Page | Short version |
 | --- | --- |
-| [The warmup contract](warmup-contract.md) | Compliant, `WARMUP_NOT_GUARDED`, `WARMUP_NOT_CACHED` |
-| [Warmup caching shapes](warmup-caching.md) | Field stores, locals, collections, maps, arrays, loops, ternaries |
-| [The warmup boundary](warmup-contract.md#the-boundary) | Why a hot path calling a warmup method is clean |
+| [The warmup contract](warmup-contract.md) | Where allocation is allowed: guarded by a branch, and kept. |
+| [What counts as cached](warmup-caching.md) | Fields, locals, collections, arrays — and what does not count. |
+| [Where annotations can go](annotation-semantics.md) | Methods, constructors, types, and what each one covers. |
 
-## Annotation semantics
+## About the examples
 
-| Scenario | What it covers |
-| --- | --- |
-| [Annotation semantics](annotation-semantics.md) | Type-level, constructors, static initialisers, overrides, both annotations at once |
+Everything on these pages comes from the fixtures in
+`core/src/test/java/com/staticallocationchecker/fixtures/`, which are the same classes the test
+suite asserts against. If a page shows a finding, that is the finding the tool produces — currently
+34 across the whole corpus. See [Regenerating these pages](regenerating.md) to re-derive them.

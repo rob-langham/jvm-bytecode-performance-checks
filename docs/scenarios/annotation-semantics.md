@@ -1,35 +1,24 @@
 ---
-title: Annotation semantics
+title: Where annotations can go
 parent: Allocation Scenarios
 nav_order: 15
 ---
 
-# Annotation semantics
+# Where annotations can go
 
-Where the annotations can go, what they reach, and the three places the behaviour will surprise you.
+**On a method, a constructor, or a whole type.** What each choice covers is not always obvious, and
+one of them covers far more than people expect.
 
-All examples are from
-`core/src/test/java/com/staticallocationchecker/fixtures/AnnotationSemantics.java` and
-`TypeLevelZeroAllocations.java`.
+## On a method
 
-## Both annotations are `@Target({METHOD, CONSTRUCTOR, TYPE})`
+The normal case. Covers that method and everything it calls
+[transitively](transitive-calls.md).
 
-```java
-@Retention(RetentionPolicy.RUNTIME)
-@Target({ElementType.METHOD, ElementType.CONSTRUCTOR, ElementType.TYPE})
-public @interface ZeroAllocations {
-}
-```
+Static and private methods work exactly the same way. Entry points are found by scanning class
+files, not by tracing reachability from `main`, so a `private` method with the annotation is checked
+whether or not anything calls it.
 
-`RUNTIME` retention is what makes them visible in the class file — the checker reads
-`visibleAnnotations`, which only carries runtime-retained annotations.
-
-`ElementType` distinguishes `CONSTRUCTOR` from `METHOD`, so covering a constructor needs its own
-target. Both annotations have one.
-
-## Constructors can be annotated directly
-
-`core/src/test/java/com/staticallocationchecker/fixtures/AnnotatedConstructors.java`
+## On a constructor
 
 ```java
 public static class ZeroAllocationConstructor {
@@ -37,249 +26,130 @@ public static class ZeroAllocationConstructor {
 
     @ZeroAllocations
     public ZeroAllocationConstructor(Object supplied) {
-        this.value = supplied;
+        this.value = supplied;              // clean
     }
 
     @ZeroAllocations
     public ZeroAllocationConstructor(int count) {
-        this.value = new int[count];
+        this.value = new int[count];        // reported, line 20, NEW_ARRAY
     }
 
-    /** Unannotated, so its allocation is nobody's business. */
     public ZeroAllocationConstructor() {
-        this.value = new Object();
+        this.value = new Object();          // not annotated: not checked
     }
 }
 ```
 
-One finding:
+**Overloads are independent.** Each constructor is selected by its signature, so annotating one says
+nothing about the others. That is the point of being able to annotate a constructor at all: you can
+cover the one that runs on a hot path without dragging in the others.
 
-| Field | Value |
-| --- | --- |
-| `kind` | `ZERO_ALLOCATION_VIOLATION` |
-| `className` | `…AnnotatedConstructors$ZeroAllocationConstructor` |
-| `methodName` / `methodDescriptor` | `<init>` `(I)V` |
-| `line` | `20` |
-| `category` | `NEW_ARRAY` |
-
-Three constructors, and the checker picks out exactly the annotated one that allocates.
-**Overloads are distinguished by descriptor**, so `<init>(Ljava/lang/Object;)V` is checked and
-clean, `<init>(I)V` is checked and reported, and `<init>()V` is not an entry point at all — its
-`new Object()` is unannotated and therefore nobody's business.
-
-This is the reason it matters: covering a hot-path constructor no longer means annotating the whole
-type and dragging in every other method with it.
-
-The warmup contract applies to a constructor the same way:
+The warmup contract applies to constructors too, judged the same way:
 
 ```java
-public static class WarmupConstructor {
-    private Object cache;
-
-    @AllocationsForWarmup
-    public WarmupConstructor(boolean eager) {
-        if (eager) {
-            cache = new Object();       // guarded and cached: compliant
-        }
+@AllocationsForWarmup
+public WarmupConstructor(boolean eager) {
+    if (eager) {
+        cache = new Object();       // guarded and cached: compliant
     }
 }
 
-public static class NonCompliantWarmupConstructor {
-    private Object cache;
-
-    @AllocationsForWarmup
-    public NonCompliantWarmupConstructor() {
-        cache = new Object();           // WARMUP_NOT_GUARDED, line 55
-    }
+@AllocationsForWarmup
+public NonCompliantWarmupConstructor() {
+    cache = new Object();           // WARMUP_NOT_GUARDED, line 55
 }
 ```
 
-Entry-point discovery already iterated `<init>` — a constructor has always been just another method
-in the class file. Only the `@Target` stood in the way.
-
 {: .note }
-> A warmup-annotated constructor is an odd thing to reach for. `@AllocationsForWarmup` describes
-> lazy initialisation, and a constructor is eager by definition, so a compliant one has to be
-> conditional on a parameter. The contract still applies uniformly, which is what the fixture pins
-> down.
+> A warmup-annotated constructor is an odd thing to want. `@AllocationsForWarmup` describes lazy
+> initialisation, and a constructor is eager by definition — so satisfying the contract means making
+> it conditional on a parameter. The rules apply uniformly; whether you want them to here is another
+> question.
 
-## Type-level `@ZeroAllocations` covers every method
+## On a type
+
+Covers **every method the class declares** — including the ones you did not write.
 
 ```java
 @ZeroAllocations
 public class TypeLevelZeroAllocations {
-
-    public Object first() {
-        return new Object();
-    }
-
-    public Object second() {
-        return new Object();
-    }
+    public Object first()  { return new Object(); }    // reported, line 10
+    public Object second() { return new Object(); }    // reported, line 14
 }
 ```
 
-Two findings, one per method.
-
-```java
-boolean typeLevel = hasAnnotation(classNode.visibleAnnotations, ZERO_ALLOCATIONS);
-for (MethodNode method : classNode.methods) {
-    if (isWarmup(classNode, method)) {
-        analyzeWarmupMethod(classNode, method, index, findings);
-    } else if (typeLevel || hasAnnotation(method.visibleAnnotations, ZERO_ALLOCATIONS)) {
-        walkEntry(classNode, method, index, hierarchy, findings);
-    }
-}
-```
-
-`classNode.methods` is *every* method in the class file — which includes some you did not write.
-
-## …including the constructor and the static initialiser
+That much is expected. This is the part that is not:
 
 ```java
 @ZeroAllocations
 public static class TypeLevelReachesInitialisers {
-    static final Object STATIC_FIELD = new Object();
+    static final Object STATIC_FIELD = new Object();   // reported in <clinit>, line 42
 
     private final Object field;
 
     public TypeLevelReachesInitialisers() {
-        this.field = new Object();
+        this.field = new Object();                     // reported in <init>, line 47
     }
 }
 ```
 
-| `methodName` | `line` | `category` |
+| `methodName` | `line` | Where it came from |
 | --- | --- | --- |
-| `<init>` | 26 | `NEW` |
-| `<clinit>` | 21 | `NEW` |
+| `<init>` | 47 | the constructor |
+| `<clinit>` | 42 | the **static field initialiser** |
 
-Both are methods in the class file, so both are entry points. Field initialisers are compiled into
-them, which is why `STATIC_FIELD = new Object()` — a line that looks nothing like a method body —
-turns up as a finding in `<clinit>` at line 21.
+Field initialisers are compiled into the constructor and the static initialiser, so a line that
+looks nothing like a method body turns up as a finding inside one.
 
 {: .warning }
-> **This is the main reason not to start with a type-level annotation.** Almost every class
-> allocates in its constructor; that is what constructors are for. Type-level `@ZeroAllocations` is
-> for a stateless helper class or a fully-preallocated hot-path object, not as a shortcut for
-> annotating three methods.
+> **This is why you should not start with a type-level annotation.** Nearly every class allocates in
+> its constructor — that is what constructors are for. Type-level `@ZeroAllocations` suits a
+> stateless helper or a fully-preallocated hot-path object; it is not a shortcut for annotating
+> three methods.
 
-## Type-level `@AllocationsForWarmup` applies the warmup contract to every method
+Type-level `@AllocationsForWarmup` works the same way, applying the warmup contract to every method,
+and making every one of them a [boundary](warmup-contract.md#the-boundary). On a class whose whole
+job is initialisation, that is a reasonable thing to want.
+
+## Both annotations on one method
 
 ```java
+@ZeroAllocations
 @AllocationsForWarmup
-public static class TypeLevelWarmup {
-    private Object cache;
-
-    public Object compliant() {
-        if (cache == null) {
-            cache = new Object();
-        }
-        return cache;
-    }
-
-    public Object unconditional() {
-        cache = new Object();
-        return cache;
-    }
+public Object entry() {
+    return new Object();
 }
 ```
 
-One finding: `WARMUP_NOT_GUARDED` on `unconditional`, line 47. `isWarmup` checks the method and its
-owner:
+| `kind` | `category` | `line` |
+| --- | --- | --- |
+| `CONFLICTING_CONTRACTS` | `null` | `-1` |
 
-```java
-private static boolean isWarmup(ClassNode owner, MethodNode method) {
-    return hasAnnotation(method.visibleAnnotations, ALLOCATIONS_FOR_WARMUP)
-            || hasAnnotation(owner.visibleAnnotations, ALLOCATIONS_FOR_WARMUP);
-}
-```
+The two contracts contradict each other — one forbids allocation, the other permits it under
+conditions — so this is reported as a mistake in the declaration rather than resolved by picking a
+winner. Decide which one you meant.
 
-This is a reasonable thing to put on a dedicated initialisation class — every method gets held to
-the lazy-init shape, and every method becomes a boundary that `@ZeroAllocations` walks stop at.
+Note this is different from the same two annotations appearing on *different* methods in a
+hierarchy, where the more specific declaration legitimately wins. See
+[inheritance](inheritance.md#an-override-can-declare-its-own-contract).
 
-## Static and private methods work normally
+## Inherited by overrides
 
-```java
-public static class MemberKinds {
-    @ZeroAllocations
-    public static Object staticMethod() {
-        return new Object();
-    }
-
-    @ZeroAllocations
-    private Object privateMethod() {
-        return new Object();
-    }
-}
-```
-
-Both are reported (lines 56 and 61). Entry-point discovery is a scan over class files, not a
-reachability analysis from some `main`, so accessibility is irrelevant — a `private` method with the
-annotation is an entry point whether or not anything calls it.
-
-## An override does not inherit the contract
-
-```java
-public static class AnnotatedParent {
-    @ZeroAllocations
-    public Object make() {
-        return null;
-    }
-}
-
-public static class UnannotatedOverride extends AnnotatedParent {
-    @Override
-    public Object make() {
-        return new Object();
-    }
-}
-```
-
-**No finding.** `UnannotatedOverride#make` allocates, overrides a method under a zero-allocation
-contract, and is reported nowhere.
-
-This follows Java's own rule — annotations are not inherited by overriding methods, and
-`@Inherited` only applies to class-level annotations on superclasses, never to methods. The class
-file for `UnannotatedOverride` simply has no annotation on `make`, and there is nothing for the
-scan to find.
-
-It is still a hole. A `@ZeroAllocations` method on an interface or base class reads like a contract
-on the API, and it is not one.
-
-{: .warning }
-> **Repeat the annotation on every override.** There is no check that will tell you that you forgot.
-> Note the asymmetry with [virtual dispatch](virtual-dispatch.md): if some *other* annotated method
-> calls `make()` through a `AnnotatedParent`-typed reference, the override **is** walked and the
-> allocation **is** found. It is only the annotation-as-entry-point that fails to propagate.
-
-## Both annotations on one method: warmup wins
-
-```java
-public static class BothOnOneMethod {
-    @ZeroAllocations
-    @AllocationsForWarmup
-    public Object entry() {
-        return new Object();
-    }
-}
-```
-
-One finding: `WARMUP_NOT_GUARDED` on line 14.
-
-The `if (isWarmup(...))` branch is tested first, so the warmup contract applies and the
-zero-allocation annotation is ignored entirely — silently. Two contradictory contracts on one method
-should be an error; today it is a coin-flip decided by branch order. Known gap, with a `@Disabled`
-test naming it.
+An override does not need to repeat the annotation — the contract propagates down, including from
+interfaces. That has its own section on the [inheritance page](inheritance.md#inheriting-the-contract),
+because it is the most useful placement rule in the tool: **annotate the interface, and every
+implementation is held to it.**
 
 ## Summary
 
-| Placement | Reaches |
+| Placement | Covers |
 | --- | --- |
-| `@ZeroAllocations` on a method | That method and everything it calls transitively |
-| `@ZeroAllocations` on a type | Every method **including `<init>` and `<clinit>`** |
-| `@AllocationsForWarmup` on a method | That method's own allocations; also a boundary for walks |
-| `@AllocationsForWarmup` on a type | Every method, same contract, all boundaries |
-| Either, on a constructor | That constructor, selected by descriptor — other overloads are unaffected |
-| Either, on an override of an annotated method | **Nothing** — annotations are not inherited |
-| Both, on one method | Warmup wins, silently |
+| Method | That method, plus everything it calls transitively |
+| Constructor | That constructor only — overloads are independent |
+| Type | Every declared method, **including `<init>` and `<clinit>`** |
+| Interface method | Every implementation the checker can see |
+| Superclass method | Every override, unless the override declares its own contract |
+| Both annotations, one method | Nothing — reported as `CONFLICTING_CONTRACTS` |
+
+Both annotations are `@Retention(RUNTIME)`, which is what makes them visible in the compiled class
+file where the checker reads them, and `@Target({METHOD, CONSTRUCTOR, TYPE})`.
