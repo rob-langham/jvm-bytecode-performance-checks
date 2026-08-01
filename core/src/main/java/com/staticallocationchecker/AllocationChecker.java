@@ -53,14 +53,23 @@ public final class AllocationChecker {
      *
      * @param analysisRoots    directories or jar/zip archives of {@code .class} files to analyse;
      *                         annotated entry points are discovered by scanning these
-     * @param resolveClasspath additional classpath used only to resolve callees (unused for now)
+     * @param resolveClasspath additional directories or archives used only to resolve callees.
+     *                         Classes here are followed when a hot path reaches them, but are
+     *                         never scanned for annotated entry points - they are somebody else's
+     *                         code, and their contracts are not this build's business.
      * @return the findings
      */
     public Report analyze(List<Path> analysisRoots, List<Path> resolveClasspath) {
-        Map<String, ClassNode> index = buildIndex(analysisRoots);
+        Map<String, ClassNode> analysisIndex = buildIndex(analysisRoots);
+
+        // Resolution sees both, with the analysis roots winning any clash: if the same class is on
+        // both, the copy being analysed is the one that matters.
+        Map<String, ClassNode> index = new HashMap<>(buildIndex(resolveClasspath));
+        index.putAll(analysisIndex);
+
         ClassHierarchy hierarchy = new ClassHierarchy(index);
         List<Finding> findings = new ArrayList<>();
-        for (ClassNode classNode : index.values()) {
+        for (ClassNode classNode : analysisIndex.values()) {
             boolean typeLevel = hasAnnotation(classNode.visibleAnnotations, ZERO_ALLOCATIONS);
             for (MethodNode method : classNode.methods) {
                 boolean zeroAllocations =

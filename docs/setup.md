@@ -153,8 +153,11 @@ It takes parameters:
     <additionalRoot>${project.basedir}/../shared-domain/target/classes</additionalRoot>
   </additionalRoots>
 
-  <!-- Resolution-only roots. Passed through; not yet used to widen resolution. -->
-  <resolveClasspath/>
+  <!-- Resolution-only roots: followed when a hot path reaches them, never scanned for
+       annotated entry points of their own. -->
+  <resolveClasspath>
+    <resolveClasspath>${project.basedir}/../shared-domain/target/classes</resolveClasspath>
+  </resolveClasspath>
 
   <!-- Report without failing, for adoption on an existing codebase. -->
   <ignoreFailures>false</ignoreFailures>
@@ -174,7 +177,7 @@ The analyser is a plain library, which is the escape hatch when you want to driv
 Report report = new AllocationChecker().analyze(
         List.of(Path.of("build/classes/java/main"),
                 Path.of("build/libs/shared-domain.jar")),   // directories or jar/zip archives
-        List.of());                                        // resolveClasspath: accepted, not yet used
+        List.of(Path.of("libs/third-party.jar")));         // resolved through, not scanned
 
 report.findings().forEach(System.out::println);
 if (!report.isClean()) {
@@ -183,8 +186,12 @@ if (!report.isClean()) {
 ```
 
 `analyze` takes **analysis roots**: directories or `.jar`/`.zip` archives of class files. Annotated
-entry points are discovered by scanning them, and callees are resolved within them. The second
-parameter is accepted but not yet used to widen resolution.
+entry points are discovered by scanning them, and callees are resolved within them.
+
+The second parameter is the **resolve classpath**: classes that are followed when a hot path reaches
+them, but never scanned for annotated entry points. That distinction is the point of having two
+parameters — a dependency's code should be walked to find the allocation, while its own contracts
+stay somebody else's business.
 
 {: .warning }
 > Giving the checker too few roots does not make it quieter — it makes it noisier. Every call it
