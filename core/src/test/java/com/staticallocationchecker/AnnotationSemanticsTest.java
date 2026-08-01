@@ -92,13 +92,27 @@ class AnnotationSemanticsTest {
     }
 
     @Test
-    @Disabled("GAP: Java annotations are not inherited by overrides, and the checker does not "
-            + "consult supertype declarations, so overriding an annotated method silently drops "
-            + "the contract - the most likely way for a real codebase to lose coverage")
     void contractAppliesToAnOverrideOfAnAnnotatedMethod() {
         List<Finding> findings = findings(AnnotationSemantics.UnannotatedOverride.class);
 
         assertEquals(1, findings.size(),
                 () -> "the override of an @ZeroAllocations method allocates, got " + findings);
+        assertEquals(Finding.Kind.ZERO_ALLOCATION_VIOLATION, findings.get(0).kind());
+    }
+
+    @Test
+    void contractAppliesToAnImplementationOfAnAnnotatedInterfaceMethod() {
+        List<Finding> findings = findings(AnnotationSemantics.UnannotatedImplementation.class);
+
+        assertEquals(1, findings.size(),
+                () -> "an interface can declare the contract implementations must honour, got " + findings);
+        assertEquals(Finding.Kind.ZERO_ALLOCATION_VIOLATION, findings.get(0).kind());
+    }
+
+    @Test
+    void anOverridesOwnDeclarationBeatsTheInheritedContract() {
+        assertEquals(List.of(), findings(AnnotationSemantics.OverrideDeclaringItsOwnContract.class),
+                "the override declares @AllocationsForWarmup and is compliant warmup; the "
+                        + "inherited @ZeroAllocations must not override an explicit choice");
     }
 }
