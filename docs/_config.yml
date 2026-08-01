@@ -1,0 +1,46 @@
+title: Static Allocation Checker
+description: >-
+  A static analyser for JVM bytecode that enforces allocation contracts on hot paths.
+
+url: https://rob-langham.github.io
+baseurl: /jvm-bytecode-performance-checks
+
+theme: just-the-docs
+
+# Relative .md links resolve on the rendered site as well as when browsing the
+# repository on github.com, so every page reads correctly in both places.
+plugins:
+  - jekyll-relative-links
+  - jekyll-seo-tag
+
+relative_links:
+  enabled: true
+  collections: false
+
+permalink: pretty
+
+aux_links:
+  GitHub: https://github.com/rob-langham/jvm-bytecode-performance-checks
+aux_links_new_tab: true
+
+search_enabled: true
+search:
+  heading_level: 3
+  previews: 2
+
+heading_anchors: true
+
+color_scheme: dark
+
+back_to_top: true
+back_to_top_text: "Back to top"
+
+footer_content: >-
+  Apache 2.0 licensed.
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - vendor
+  # Source for regenerating the scenario pages, not part of the site.
+  - tools
