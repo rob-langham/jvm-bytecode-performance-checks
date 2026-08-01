@@ -33,6 +33,20 @@ public final class Allocations {
      *                        {@code new} of such a type is exempt (exceptional paths are not hot)
      */
     public static AllocationCategory categoryOf(AbstractInsnNode insn, Predicate<String> isThrowableType) {
+        return categoryOf(insn, isThrowableType, call -> false);
+    }
+
+    /**
+     * As {@link #categoryOf(AbstractInsnNode, Predicate)}, but able to tell a varargs call site's
+     * synthesised array from an ordinary one.
+     *
+     * @param isVarargsCall tests whether a call site's target is declared varargs; when it cannot
+     *                      say, the array is reported as the less specific {@code NEW_ARRAY}
+     */
+    public static AllocationCategory categoryOf(
+            AbstractInsnNode insn,
+            Predicate<String> isThrowableType,
+            Predicate<MethodInsnNode> isVarargsCall) {
         if (insn instanceof InvokeDynamicInsnNode indy) {
             return invokeDynamicCategory(indy);
         }
@@ -44,11 +58,73 @@ public final class Allocations {
                 return isThrowableType.test(((TypeInsnNode) insn).desc) ? null : AllocationCategory.NEW;
             case Opcodes.NEWARRAY:
             case Opcodes.ANEWARRAY:
+                return feedsAVarargsCall(insn, isVarargsCall)
+                        ? AllocationCategory.VARARGS_ARRAY : AllocationCategory.NEW_ARRAY;
             case Opcodes.MULTIANEWARRAY:
                 return AllocationCategory.NEW_ARRAY;
             default:
                 return null;
         }
+    }
+
+    /**
+     * Whether this array allocation is the array a varargs call site synthesises.
+     *
+     * <p>Bytecode alone cannot answer this: {@code f(1, 2, 3)} and {@code f(new int[] {1, 2, 3})}
+     * compile identically. The only real signal is {@code ACC_VARARGS} on the callee, so this walks
+     * forward over the array-filling sequence to the call being fed and asks about its target.
+     */
+    private static boolean feedsAVarargsCall(
+            AbstractInsnNode arrayAllocation, Predicate<MethodInsnNode> isVarargsCall) {
+        for (AbstractInsnNode next = arrayAllocation.getNext(); next != null; next = next.getNext()) {
+            if (next instanceof MethodInsnNode call) {
+                Type[] parameters = Type.getArgumentTypes(call.desc);
+                boolean lastParameterIsArray = parameters.length > 0
+                        && parameters[parameters.length - 1].getSort() == Type.ARRAY;
+                return lastParameterIsArray && isVarargsCall.test(call);
+            }
+            if (!isArrayFillingInstruction(next)) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /** The instructions javac emits between allocating a varargs array and passing it. */
+    private static boolean isArrayFillingInstruction(AbstractInsnNode insn) {
+        int opcode = insn.getOpcode();
+        if (opcode < 0) {
+            return true; // labels, line numbers and frames carry no semantics
+        }
+        return opcode == Opcodes.DUP
+                || (opcode >= Opcodes.ACONST_NULL && opcode <= Opcodes.LDC)
+                || (opcode >= Opcodes.ILOAD && opcode <= Opcodes.ALOAD)
+                || (opcode >= Opcodes.IASTORE && opcode <= Opcodes.SASTORE);
+    }
+
+    /** Whether a call site's target is a varargs method, resolved through {@code loader}. */
+    public static boolean isVarargsByReflection(MethodInsnNode call, ClassLoader loader) {
+        try {
+            Class<?> owner = Class.forName(Type.getObjectType(call.owner).getClassName(), false, loader);
+            Type[] parameters = Type.getArgumentTypes(call.desc);
+            for (java.lang.reflect.Executable candidate : candidates(owner, call.name)) {
+                if (candidate.isVarArgs() && candidate.getParameterCount() == parameters.length) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static java.lang.reflect.Executable[] candidates(Class<?> owner, String methodName) {
+        if ("<init>".equals(methodName)) {
+            return owner.getDeclaredConstructors();
+        }
+        return java.util.Arrays.stream(owner.getDeclaredMethods())
+                .filter(m -> m.getName().equals(methodName))
+                .toArray(java.lang.reflect.Executable[]::new);
     }
 
     /**

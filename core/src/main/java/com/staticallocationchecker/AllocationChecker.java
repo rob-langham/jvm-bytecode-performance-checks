@@ -304,7 +304,24 @@ public final class AllocationChecker {
 
     /** Unified allocation-site classifier that exempts Throwable allocations resolvable via {@code index}. */
     private AllocationCategory siteCategory(AbstractInsnNode insn, Map<String, ClassNode> index) {
-        return Allocations.categoryOf(insn, name -> isThrowable(name, index));
+        return Allocations.categoryOf(
+                insn, name -> isThrowable(name, index), call -> isVarargs(call, index));
+    }
+
+    /**
+     * Whether a call site's target is varargs. The index is authoritative for code under analysis;
+     * reflection covers callees outside it, such as the JDK's own varargs methods.
+     */
+    private boolean isVarargs(MethodInsnNode call, Map<String, ClassNode> index) {
+        ClassNode owner = index.get(call.owner);
+        if (owner != null) {
+            for (MethodNode method : owner.methods) {
+                if (method.name.equals(call.name) && method.desc.equals(call.desc)) {
+                    return (method.access & Opcodes.ACC_VARARGS) != 0;
+                }
+            }
+        }
+        return Allocations.isVarargsByReflection(call, getClass().getClassLoader());
     }
 
     /** Whether {@code internalName} resolves to a subtype of {@link Throwable}. */

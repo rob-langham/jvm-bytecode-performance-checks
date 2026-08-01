@@ -124,6 +124,7 @@ public final class WarmupInstrumenter {
     private boolean instrumentMethod(ClassNode classNode, MethodNode method) {
         String binaryClass = Type.getObjectType(classNode.name).getClassName();
         Predicate<String> isThrowable = name -> Allocations.isThrowableByReflection(name, resolutionLoader);
+        Predicate<MethodInsnNode> isVarargs = call -> Allocations.isVarargsByReflection(call, resolutionLoader);
         boolean changed = false;
         int line = -1;
         AbstractInsnNode[] original = method.instructions.toArray();
@@ -133,7 +134,7 @@ public final class WarmupInstrumenter {
                 line = lineNode.line;
                 continue;
             }
-            AllocationCategory category = Allocations.categoryOf(insn, isThrowable);
+            AllocationCategory category = Allocations.categoryOf(insn, isThrowable, isVarargs);
             if (category == null) {
                 continue;
             }
