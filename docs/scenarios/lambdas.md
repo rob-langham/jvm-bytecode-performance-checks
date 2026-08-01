@@ -162,39 +162,3 @@ public Runnable capturing(StringBuilder sink) {
 This is one of the few places the checker can prove a *lack* of allocation rather than assuming the
 worst. Everywhere else it is deliberately conservative; here the JVM's specification guarantees a
 non-capturing lambda need not produce a fresh instance, so a clean verdict is a real one.
-
-## In the bytecode
-
-{: .note }
-> Only if you want it. Nothing above depends on reading this section.
-
-Both lambdas compile to a single `invokedynamic`, which produces the object. The difference is
-what that instruction takes off the stack first — and the stack column makes it obvious:
-
-```
-  public Runnable stateless();                             stack after   locals
-       0: invokedynamic run:()Runnable                     [Runnable]    0=this
-                        ^^ takes NOTHING off the stack. There is no state to
-                           put in the object, so the JVM returns a shared one.
-       5: areturn                                          []
-
-  public Runnable capturing(StringBuilder sink);           stack after   locals
-       0: aload_1                                          [sink]        0=this 1=sink
-                        ^^ the captured value is pushed first...
-       1: invokedynamic run:(StringBuilder)Runnable        [Runnable]    0=this 1=sink
-                        ^^ ...and consumed here. A fresh object is built to
-                           hold it, every time this line runs.
-       6: areturn                                          []
-```
-
-The argument types of the `invokedynamic` **are** the captured values. That is exactly the test the
-checker applies:
-
-```java
-boolean capturing = Type.getArgumentTypes(indy.desc).length > 0;
-return capturing ? AllocationCategory.LAMBDA : null;
-```
-
-The lambda body itself compiles to a separate synthetic method — `lambda$capturing$2` — which is
-where the code you wrote actually lives. That method is not the allocation; the `invokedynamic`
-that produces the object is.

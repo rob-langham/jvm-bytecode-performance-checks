@@ -99,5 +99,5 @@ three methods that all contain a `new`:
 | `throwsCustomException` | `new CustomException()` | **No** — exempt |
 | `allocatesObject` | `new Object()` | **Yes**, line 28, `NEW` |
 
-One finding from three `new` instructions. The opcode is identical in all three cases — what
-differs is the type being allocated.
+One finding from three `new` expressions. Nothing distinguishes them except the type being
+allocated — which is exactly what the exemption tests.

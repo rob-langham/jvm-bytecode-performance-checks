@@ -105,30 +105,3 @@ public Object box(int n) {
 | `methodName` | `box` |
 | `line` | `10` |
 | `category` | `BOXING` |
-
-## In the bytecode
-
-{: .note }
-> Optional.
-
-The assignment compiles to a call you never wrote. Locals are numbered slots: `0` is `this`, `1` is
-the parameter `n`, `2` is the local variable `boxed`.
-
-```
-  public java.lang.Object box(int);            stack after     locals
-       0: iload_1                              [42]            0=this 1=42
-                                               ^ a raw int, 4 bytes of value, no object
-       1: invokestatic Integer.valueOf(I)      [Integer]       0=this 1=42
-                                               ^ pops the int, pushes a REFERENCE to a
-                                                 heap object that contains it
-       4: astore_2                             []              0=this 1=42 2=Integer
-       5: aload_2                              [Integer]
-       6: areturn                              []
-```
-
-Instruction 0 has a number. Instruction 1 has a pointer to an object holding that number. The
-allocation is the whole difference between those two lines, and in the source it is the `=`.
-
-The checker matches that exact shape — a static call to a wrapper type's `valueOf` taking a single
-primitive argument. The arity and primitive-argument tests are what keep `Integer.valueOf(String)`,
-which is parsing rather than boxing, from being reported.

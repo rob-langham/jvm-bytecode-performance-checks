@@ -77,31 +77,3 @@ public Object make() {
 
 That reports nothing at all. The allocation still exists — it just happens once, on a path the
 checker can prove is skippable. See [the warmup contract](warmup-contract.md).
-
-## In the bytecode
-
-{: .note }
-> Optional. Nothing above depends on this.
-
-The JVM is a stack machine: instructions push and pop values rather than naming registers. Reading
-the stack column is what makes the two-step nature of `new Foo()` visible.
-
-```
-  public java.lang.Object make();                        stack after
-       0: new           #2   // class java/lang/Object   [obj]         allocate; fields all zero,
-                                                                       constructor NOT yet run
-       3: dup                                            [obj, obj]    second reference to the
-                                                                       same object, not a copy of it
-       4: invokespecial #1   // Object."<init>":()V      [obj]         pops one reference, runs
-                                                                       the constructor on it
-       7: areturn                                        []            returns the other reference
-```
-
-The `dup` is there because `invokespecial` **consumes** the reference it initialises. Without the
-duplicate there would be nothing left to return. Both entries point at the same object — the stack
-holds references, so duplicating one costs nothing.
-
-So the object exists, allocated and zeroed, from instruction 0. The constructor at instruction 4
-only fills it in. That is why the checker reports the `new` and explicitly skips `<init>` calls: the
-source comment calls constructor calls "construction, already represented by the paired allocation
-opcode".
