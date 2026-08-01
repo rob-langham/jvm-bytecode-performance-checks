@@ -12,11 +12,11 @@ All examples are from
 `core/src/test/java/com/staticallocationchecker/fixtures/AnnotationSemantics.java` and
 `TypeLevelZeroAllocations.java`.
 
-## Both annotations are `@Target({METHOD, TYPE})`
+## Both annotations are `@Target({METHOD, CONSTRUCTOR, TYPE})`
 
 ```java
 @Retention(RetentionPolicy.RUNTIME)
-@Target({ElementType.METHOD, ElementType.TYPE})
+@Target({ElementType.METHOD, ElementType.CONSTRUCTOR, ElementType.TYPE})
 public @interface ZeroAllocations {
 }
 ```
@@ -24,10 +24,84 @@ public @interface ZeroAllocations {
 `RUNTIME` retention is what makes them visible in the class file — the checker reads
 `visibleAnnotations`, which only carries runtime-retained annotations.
 
-`{METHOD, TYPE}` has a consequence: **neither annotation can go on a constructor**. `ElementType`
-distinguishes `CONSTRUCTOR` from `METHOD`, so `@ZeroAllocations` on a `<init>` is a compile error.
-The only way to reach a constructor is a type-level annotation — which is a known gap, since a
-constructor is often exactly the thing you want to exempt.
+`ElementType` distinguishes `CONSTRUCTOR` from `METHOD`, so covering a constructor needs its own
+target. Both annotations have one.
+
+## Constructors can be annotated directly
+
+`core/src/test/java/com/staticallocationchecker/fixtures/AnnotatedConstructors.java`
+
+```java
+public static class ZeroAllocationConstructor {
+    private final Object value;
+
+    @ZeroAllocations
+    public ZeroAllocationConstructor(Object supplied) {
+        this.value = supplied;
+    }
+
+    @ZeroAllocations
+    public ZeroAllocationConstructor(int count) {
+        this.value = new int[count];
+    }
+
+    /** Unannotated, so its allocation is nobody's business. */
+    public ZeroAllocationConstructor() {
+        this.value = new Object();
+    }
+}
+```
+
+One finding:
+
+| Field | Value |
+| --- | --- |
+| `kind` | `ZERO_ALLOCATION_VIOLATION` |
+| `className` | `…AnnotatedConstructors$ZeroAllocationConstructor` |
+| `methodName` / `methodDescriptor` | `<init>` `(I)V` |
+| `line` | `20` |
+| `category` | `NEW_ARRAY` |
+
+Three constructors, and the checker picks out exactly the annotated one that allocates.
+**Overloads are distinguished by descriptor**, so `<init>(Ljava/lang/Object;)V` is checked and
+clean, `<init>(I)V` is checked and reported, and `<init>()V` is not an entry point at all — its
+`new Object()` is unannotated and therefore nobody's business.
+
+This is the reason it matters: covering a hot-path constructor no longer means annotating the whole
+type and dragging in every other method with it.
+
+The warmup contract applies to a constructor the same way:
+
+```java
+public static class WarmupConstructor {
+    private Object cache;
+
+    @AllocationsForWarmup
+    public WarmupConstructor(boolean eager) {
+        if (eager) {
+            cache = new Object();       // guarded and cached: compliant
+        }
+    }
+}
+
+public static class NonCompliantWarmupConstructor {
+    private Object cache;
+
+    @AllocationsForWarmup
+    public NonCompliantWarmupConstructor() {
+        cache = new Object();           // WARMUP_NOT_GUARDED, line 55
+    }
+}
+```
+
+Entry-point discovery already iterated `<init>` — a constructor has always been just another method
+in the class file. Only the `@Target` stood in the way.
+
+{: .note }
+> A warmup-annotated constructor is an odd thing to reach for. `@AllocationsForWarmup` describes
+> lazy initialisation, and a constructor is eager by definition, so a compliant one has to be
+> conditional on a parameter. The contract still applies uniformly, which is what the fixture pins
+> down.
 
 ## Type-level `@ZeroAllocations` covers every method
 
@@ -206,6 +280,6 @@ test naming it.
 | `@ZeroAllocations` on a type | Every method **including `<init>` and `<clinit>`** |
 | `@AllocationsForWarmup` on a method | That method's own allocations; also a boundary for walks |
 | `@AllocationsForWarmup` on a type | Every method, same contract, all boundaries |
-| Either, on a constructor | **Not possible** — `@Target` has no `CONSTRUCTOR` |
+| Either, on a constructor | That constructor, selected by descriptor — other overloads are unaffected |
 | Either, on an override of an annotated method | **Nothing** — annotations are not inherited |
 | Both, on one method | Warmup wins, silently |

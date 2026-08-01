@@ -191,10 +191,16 @@ whether they *stop* going up while load continues.
 
 ## Doing this in your own load test
 
-**1. Attach at startup, not by dynamic attach.** The agent instruments at class-load time. It
-declares `Can-Retransform-Classes` but never calls `retransformClasses`, so attaching to a running
-JVM misses every class already loaded — which, by the time you notice a problem, is all of them.
-Known gap.
+**1. Attach at startup where you can; attaching later also works.** `premain` instruments at
+class-load time, which covers everything because nothing of the application is loaded that early.
+`agentmain` — the attach-API path — additionally sweeps `getAllLoadedClasses()` and retransforms
+those declaring `@AllocationsForWarmup`, so attaching to a running JVM does see the classes that
+were already loaded.
+
+Two limits on the attach path worth knowing: **bootstrap-loaded classes are skipped**, because they
+cannot see the recorder the injected probe calls, and any allocation that already happened before
+you attached is, of course, not counted. For measuring warmup specifically, starting with
+`-javaagent` remains the more honest measurement.
 
 **2. Get past your real warmup first, then `reset()`.** Class loading, JIT compilation, connection
 pools and caches all legitimately allocate early. Drive load until throughput stabilises, call
@@ -233,10 +239,12 @@ both can allocate unboundedly.
 
 ## Gaps to be aware of
 
-- **Lambda bodies are not instrumented.** A lambda body compiles to a synthetic method carrying no
-  annotation, so a warmup method doing its work inside a lambda records nothing. A count of 0 does
-  not prove a site did not fire.
-- **Dynamic attach instruments nothing already loaded.** Use `-javaagent` at startup.
+- **Lambda bodies are not instrumented**
+  ([#2](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/2)). A lambda body
+  compiles to a synthetic method carrying no annotation, so a warmup method doing its work inside a
+  lambda records nothing. A count of 0 does not prove a site did not fire.
+- **On dynamic attach, bootstrap-loaded classes are skipped**, and anything that allocated before
+  you attached was never counted.
 - **The recorder only sees `@AllocationsForWarmup` methods.** It is not a general allocation
   profiler — for that, use JFR's `ObjectAllocationSample` or async-profiler. This tool answers one
   narrow question: did the sites I declared as warmup actually stop firing?
