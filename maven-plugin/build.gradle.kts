@@ -15,3 +15,20 @@ dependencies {
 mavenPlugin {
     goalPrefix.set("static-allocation-checker")
 }
+
+// The mojo tests copy compiled fixtures out of :core's test output to build a synthetic module.
+val coreTestClasses = project(":core").layout.buildDirectory.dir("classes/java/test")
+
+// @Mojo has CLASS retention, so the goal's binding can only be verified through the descriptor
+// that maven-plugin-tools generates - which is also what Maven itself consumes.
+val descriptorFile = layout.buildDirectory.file("mavenPlugin/descriptor/META-INF/maven/plugin.xml")
+
+tasks.test {
+    dependsOn(":core:testClasses", "generateMavenPluginDescriptor")
+    jvmArgumentProviders.add(CommandLineArgumentProvider {
+        listOf(
+            "-DfixtureClasses=${coreTestClasses.get().asFile.absolutePath}",
+            "-DpluginDescriptor=${descriptorFile.get().asFile.absolutePath}",
+        )
+    })
+}
