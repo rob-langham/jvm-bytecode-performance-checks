@@ -48,6 +48,9 @@ public final class AllocationChecker {
     private static final String ALLOCATIONS_FOR_WARMUP =
             "Lcom/staticallocationchecker/annotations/AllocationsForWarmup;";
 
+    /** Keyed by identity: each analyse run builds one index and wants one oracle for it. */
+    private final Map<Map<String, ClassNode>, TypeOracle> oracles = new IdentityHashMap<>();
+
     /**
      * Analyses the given roots.
      *
@@ -311,46 +314,22 @@ public final class AllocationChecker {
         return false;
     }
 
-    /** Unified allocation-site classifier that exempts Throwable allocations resolvable via {@code index}. */
-    private AllocationCategory siteCategory(AbstractInsnNode insn, Map<String, ClassNode> index) {
-        return Allocations.categoryOf(
-                insn, name -> isThrowable(name, index), call -> isVarargs(call, index));
-    }
-
     /**
-     * Whether a call site's target is varargs. The index is authoritative for code under analysis;
-     * reflection covers callees outside it, such as the JDK's own varargs methods.
+     * Allocation-site classification, resolved through the shared {@link TypeOracle}.
+     *
+     * <p>The checker and the runtime instrumenter previously each carried their own hierarchy walk
+     * and their own fallbacks, so the same code could be classified one way at build time and
+     * another at runtime. Both now go through the same algorithm; only the reachable class data
+     * differs, which is a real difference in what is knowable rather than one in policy.
      */
-    private boolean isVarargs(MethodInsnNode call, Map<String, ClassNode> index) {
-        ClassNode owner = index.get(call.owner);
-        if (owner != null) {
-            for (MethodNode method : owner.methods) {
-                if (method.name.equals(call.name) && method.desc.equals(call.desc)) {
-                    return (method.access & Opcodes.ACC_VARARGS) != 0;
-                }
-            }
-        }
-        return Allocations.isVarargsByReflection(call, getClass().getClassLoader());
+    private AllocationCategory siteCategory(AbstractInsnNode insn, Map<String, ClassNode> index) {
+        return oracleFor(index).categoryOf(insn);
     }
 
-    /** Whether {@code internalName} resolves to a subtype of {@link Throwable}. */
-    private boolean isThrowable(String internalName, Map<String, ClassNode> index) {
-        String current = internalName;
-        while (current != null) {
-            if (current.equals("java/lang/Throwable")) {
-                return true;
-            }
-            if (current.equals("java/lang/Object")) {
-                return false;
-            }
-            ClassNode node = index.get(current);
-            if (node != null) {
-                current = node.superName;
-            } else {
-                return Allocations.isThrowableByReflection(current, getClass().getClassLoader());
-            }
-        }
-        return false;
+    /** One oracle per index, so its supertype walks are cached across every site in a run. */
+    private TypeOracle oracleFor(Map<String, ClassNode> index) {
+        return oracles.computeIfAbsent(
+                index, key -> TypeOracle.forIndex(key, getClass().getClassLoader()));
     }
 
     private static String signature(ClassNode owner, MethodNode method) {
