@@ -17,6 +17,12 @@ That compiles every scenario, runs the checker over each, and prints the finding
 The scenarios that are *meant* to produce findings set `ignoreFailures`, so a red build here means
 something is genuinely wrong.
 
+Each scenario declares what it should report in `expected-findings.txt`, and that file is checked
+from two directions: this build compares the count, and the library's own test suite compiles these
+scenarios and asserts every finding in full. So the demos are not just documentation that might be
+stale — they are the end-to-end tests, and `./gradlew build` fails if one stops behaving as
+described.
+
 Then the runtime one, which needs a real JVM with the agent attached:
 
 ```bash

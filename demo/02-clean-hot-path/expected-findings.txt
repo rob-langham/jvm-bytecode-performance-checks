@@ -1,0 +1,6 @@
+# What the checker reports for this scenario, asserted by DemoScenarioTest in the
+# library build and counted by the demo build's `demo` task.
+#
+# Nothing. This scenario fails its build if anything appears here.
+#
+# Format: KIND | class#method | CATEGORY

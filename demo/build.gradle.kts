@@ -14,22 +14,25 @@ subprojects {
 }
 
 /**
- * What each scenario's README promises it will report.
+ * How many findings each scenario should produce, read from the `expected-findings.txt` that sits
+ * beside it.
  *
- * <p>Most scenarios set `ignoreFailures` so they can show their output rather than halting the
- * run - which means a checker that silently stopped finding anything would leave every demo
- * passing and every README quietly wrong. Asserting the counts is what makes `demo` a real check
- * rather than a "did it exit zero" check.
+ * <p>That same file is asserted in full - kind, method and category, not merely the count - by
+ * `DemoScenarioTest` in the library build, which compiles these scenarios and runs the checker over
+ * them. Keeping both checks on one file is what stops the demos and their documentation drifting
+ * apart, which is the failure this whole arrangement exists to prevent.
+ *
+ * <p>The count still matters here because most scenarios set `ignoreFailures` so they can show
+ * their output rather than halting the run: without an assertion, a checker that silently stopped
+ * finding anything would leave every demo passing and every README quietly wrong.
  */
-val expectedFindings = mapOf(
-    "01-zero-allocation-basics" to 6,
-    "02-clean-hot-path" to 0,
-    "03-warmup-contract" to 2,
-    "04-dispatch-and-inheritance" to 5,
-    "05-varargs" to 2,
-    "06-conflicting-contracts" to 1,
-    "07-runtime-flight-recorder" to 0,
-)
+fun expectedFindingCount(scenario: Project): Int? {
+    val file = scenario.file("expected-findings.txt")
+    if (!file.exists()) {
+        return null
+    }
+    return file.readLines().count { it.isNotBlank() && !it.trimStart().startsWith("#") }
+}
 
 /**
  * Runs every scenario, prints its findings, and checks them against what its README claims.
@@ -54,7 +57,7 @@ tasks.register("demo") {
             } else {
                 emptyList()
             }
-            val expected = expectedFindings[scenario.name]
+            val expected = expectedFindingCount(scenario)
 
             println()
             println("── ${scenario.name} ".padEnd(78, '─'))

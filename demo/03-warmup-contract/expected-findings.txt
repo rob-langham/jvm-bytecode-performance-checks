@@ -1,0 +1,9 @@
+# What the checker reports for this scenario, asserted by DemoScenarioTest in the
+# library build and counted by the demo build's `demo` task.
+#
+# The two ways to break the guarded-and-cached contract.
+# Deliberately absent: buffer(), prefill(), hotPath() - all compliant.
+#
+# Format: KIND | class#method | CATEGORY
+WARMUP_NOT_CACHED | warmup.BufferPool#uncached | NEW_ARRAY
+WARMUP_NOT_GUARDED | warmup.BufferPool#unguarded | NEW_ARRAY
