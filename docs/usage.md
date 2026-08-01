@@ -198,10 +198,6 @@ entry point. It does not mean:
 
 All eight gaps tracked after the first review round are now closed. What remains:
 
-- **`resolveClasspath` is accepted but unused.** Both plugins take the parameter and pass it to the
-  analyser, which does not yet use it to widen callee resolution. Until it does, reducing
-  [unanalyzable calls](scenarios/unanalyzable-calls.md) means adding *analysis roots*, which also
-  makes any annotated methods inside them into entry points of their own.
 - **Nothing is published to an artifact repository.** See
   [Setup](setup.md#consuming-the-project-today).
 - **There is no suppression mechanism.** No baseline file, no per-site ignore, no severity levels. A

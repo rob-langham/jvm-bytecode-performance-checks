@@ -87,8 +87,9 @@ resolve from a repository as normal; nothing else in these build files would cha
 
 **`UNANALYZABLE_CALL` on JDK calls.** Scenario 01 reports one for `Map.get`, because `java.util`
 is not among the analysis roots. The checker flags what it could not follow rather than assuming it
-is clean. Widening `resolveClasspath` is intended to reduce these — it is accepted by the checker
-but not yet used, so today the honest answer is that you will see them.
+is clean. Adding the relevant jars to `resolveClasspath` lets the checker follow those calls, at the
+cost of a slower analysis; the demos leave it unset so the output shows what an unconfigured project
+sees.
 
 **The same finding more than once.** Scenario 04 reports `BoxingHandler.handle` twice: once reached
 through `dispatch()`, and once as an entry point in its own right, because it inherits

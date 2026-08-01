@@ -30,8 +30,25 @@ final class ClassHierarchy {
     private final Map<String, ClassNode> index;
     private final Map<String, List<MethodRef>> resolutionCache = new HashMap<>();
 
+    /** Supertype internal name to the types that directly extend or implement it. */
+    private final Map<String, List<String>> directSubtypes;
+
     ClassHierarchy(Map<String, ClassNode> index) {
         this.index = index;
+        this.directSubtypes = indexDirectSubtypes(index);
+    }
+
+    private static Map<String, List<String>> indexDirectSubtypes(Map<String, ClassNode> index) {
+        Map<String, List<String>> subtypes = new HashMap<>();
+        for (ClassNode node : index.values()) {
+            if (node.superName != null) {
+                subtypes.computeIfAbsent(node.superName, key -> new ArrayList<>()).add(node.name);
+            }
+            for (String interfaceName : node.interfaces) {
+                subtypes.computeIfAbsent(interfaceName, key -> new ArrayList<>()).add(node.name);
+            }
+        }
+        return subtypes;
     }
 
     /** A method together with the class that declares it. */
@@ -190,8 +207,9 @@ final class ClassHierarchy {
     /** Every indexed subtype of {@code owner} that declares a body for this method. */
     private List<MethodRef> overridesOf(String owner, String name, String descriptor) {
         List<MethodRef> overrides = new ArrayList<>();
-        for (ClassNode candidate : index.values()) {
-            if (candidate.name.equals(owner) || !isSubtypeOf(candidate.name, owner, new LinkedHashSet<>())) {
+        for (String subtype : descendantsOf(owner)) {
+            ClassNode candidate = index.get(subtype);
+            if (candidate == null) {
                 continue;
             }
             MethodNode declared = findDeclared(candidate, name, descriptor);
@@ -202,26 +220,23 @@ final class ClassHierarchy {
         return overrides;
     }
 
-    private boolean isSubtypeOf(String candidate, String supertype, Set<String> visited) {
-        if (candidate == null || !visited.add(candidate)) {
-            return false;
-        }
-        if (candidate.equals(supertype)) {
-            return true;
-        }
-        ClassNode node = index.get(candidate);
-        if (node == null) {
-            return false;
-        }
-        if (isSubtypeOf(node.superName, supertype, visited)) {
-            return true;
-        }
-        for (String interfaceName : node.interfaces) {
-            if (isSubtypeOf(interfaceName, supertype, visited)) {
-                return true;
+    /**
+     * Every indexed type below {@code supertype}, walked through the precomputed subtype map.
+     *
+     * <p>Scanning the whole index per call site was fine when the index held only the code under
+     * analysis. A resolve classpath can add a project's entire dependency graph, so the direct
+     * subtypes are indexed once up front and this walks down from the type actually asked about.
+     */
+    private Set<String> descendantsOf(String supertype) {
+        Set<String> found = new LinkedHashSet<>();
+        Deque<String> pending = new ArrayDeque<>(directSubtypes.getOrDefault(supertype, List.of()));
+        while (!pending.isEmpty()) {
+            String subtype = pending.poll();
+            if (found.add(subtype)) {
+                pending.addAll(directSubtypes.getOrDefault(subtype, List.of()));
             }
         }
-        return false;
+        return found;
     }
 
     private static MethodNode findDeclared(ClassNode owner, String name, String descriptor) {
