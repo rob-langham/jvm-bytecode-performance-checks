@@ -157,21 +157,18 @@ Early — `0.1.0-SNAPSHOT`. Nothing is published to an artifact repository yet, 
 intended coordinates rather than something you can resolve today; consume the project via a
 composite build (`includeBuild`) for now.
 
-Known gaps, each with a `@Disabled` test naming it:
+Known gaps, each tracked as an issue and pinned by a `@Disabled` test that names it:
 
-- **Lambda bodies are not instrumented.** A lambda body compiles to a synthetic method carrying no
-  annotation, so a warmup method doing its work inside a lambda records nothing.
-- **Dynamic attach instruments nothing already loaded.** The jar declares `Can-Retransform-Classes`
-  but never calls `retransformClasses`, so attaching to a running JVM misses every class loaded
-  before attach.
-- **Annotations are not inherited by overrides**, matching Java's own rule but meaning an override
-  silently drops the contract.
-- **Neither annotation can go on a constructor** — `@Target` is `{METHOD, TYPE}`; only a type-level
-  annotation reaches `<init>`.
-- **`VARARGS_ARRAY` is declared but never produced**; varargs report as `NEW_ARRAY`.
-- **Both annotations on one method**: warmup silently wins.
-- **The build plugins take no configuration** — no skip flag, no extra roots, and a missing classes
-  directory passes silently (Gradle) or throws an internal exception (Maven).
+| | Gap |
+| --- | --- |
+| [#2](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/2) | Lambda bodies are not instrumented, so warmup work inside a lambda records nothing |
+| [#3](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/3) | Dynamic attach instruments nothing already loaded |
+| [#4](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/4) | An override silently drops the `@ZeroAllocations` contract |
+| [#5](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/5) | Neither annotation can be applied to a constructor |
+| [#6](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/6) | `VARARGS_ARRAY` is declared but never produced |
+| [#7](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/7) | Both annotations on one method: warmup silently wins |
+| [#8](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/8) | Gradle task takes no configuration and passes silently with no classes directory |
+| [#9](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/9) | Maven mojo takes no parameters and fails with an internal exception |
 
 The `resolveClasspath` parameter on `analyze` is accepted but not yet used to widen callee
 resolution.
