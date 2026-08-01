@@ -5,6 +5,7 @@ import static com.staticallocationchecker.Fixtures.testClassesRoot;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.staticallocationchecker.fixtures.AnnotatedConstructors;
 import com.staticallocationchecker.fixtures.AnnotationSemantics;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
@@ -35,13 +36,39 @@ class AnnotationSemanticsTest {
     }
 
     @Test
-    @Disabled("GAP: @Target is {METHOD, TYPE}, so neither annotation can be placed on a constructor "
-            + "at all - a constructor on a hot path can only be covered by annotating the whole type")
     void annotationsCanBeAppliedToConstructors() {
-        Set<ElementType> targets = Set.of(com.staticallocationchecker.annotations.ZeroAllocations.class
-                .getAnnotation(Target.class).value());
+        assertTrue(targetsOf(com.staticallocationchecker.annotations.ZeroAllocations.class)
+                        .contains(ElementType.CONSTRUCTOR),
+                "@ZeroAllocations must be placeable on a constructor");
+        assertTrue(targetsOf(com.staticallocationchecker.annotations.AllocationsForWarmup.class)
+                        .contains(ElementType.CONSTRUCTOR),
+                "@AllocationsForWarmup must be placeable on a constructor");
+    }
 
-        assertTrue(targets.contains(ElementType.CONSTRUCTOR), () -> "targets were " + targets);
+    private static Set<ElementType> targetsOf(Class<? extends java.lang.annotation.Annotation> annotation) {
+        return Set.of(annotation.getAnnotation(Target.class).value());
+    }
+
+    @Test
+    void checksAConstructorAnnotatedDirectlyRatherThanViaItsType() {
+        List<Finding> findings = findings(AnnotatedConstructors.ZeroAllocationConstructor.class);
+
+        assertEquals(1, findings.size(),
+                () -> "only the allocating annotated constructor should be flagged, got " + findings);
+        assertEquals("<init>", findings.get(0).methodName());
+        assertEquals(AllocationCategory.NEW_ARRAY, findings.get(0).category());
+        assertEquals("(I)V", findings.get(0).methodDescriptor(),
+                "the int overload allocates; the Object overload and the unannotated one do not");
+    }
+
+    @Test
+    void appliesTheWarmupContractToAnAnnotatedConstructor() {
+        assertEquals(List.of(), findings(AnnotatedConstructors.WarmupConstructor.class),
+                "guarded and cached in a constructor is still compliant warmup");
+
+        List<Finding> violations = findings(AnnotatedConstructors.NonCompliantWarmupConstructor.class);
+        assertEquals(1, violations.size(), () -> "got " + violations);
+        assertEquals(Finding.Kind.WARMUP_NOT_GUARDED, violations.get(0).kind());
     }
 
     @Test

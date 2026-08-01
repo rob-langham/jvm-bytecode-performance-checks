@@ -16,6 +16,6 @@ import java.lang.annotation.Target;
  * annotated method it stops descending and treats compliant warmup allocations as allowed.
  */
 @Retention(RetentionPolicy.RUNTIME)
-@Target({ElementType.METHOD, ElementType.TYPE})
+@Target({ElementType.METHOD, ElementType.CONSTRUCTOR, ElementType.TYPE})
 public @interface AllocationsForWarmup {
 }

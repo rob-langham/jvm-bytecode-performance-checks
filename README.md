@@ -164,7 +164,6 @@ Known gaps, each tracked as an issue and pinned by a `@Disabled` test that names
 | [#2](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/2) | Lambda bodies are not instrumented, so warmup work inside a lambda records nothing |
 | [#3](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/3) | Dynamic attach instruments nothing already loaded |
 | [#4](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/4) | An override silently drops the `@ZeroAllocations` contract |
-| [#5](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/5) | Neither annotation can be applied to a constructor |
 | [#6](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/6) | `VARARGS_ARRAY` is declared but never produced |
 | [#7](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/7) | Both annotations on one method: warmup silently wins |
 | [#8](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/8) | Gradle task takes no configuration and passes silently with no classes directory |
