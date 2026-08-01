@@ -101,14 +101,19 @@ class WarmupContractTest {
     }
 
     @Test
-    @Disabled("GAP: isWarmup is tested before the @ZeroAllocations branch, so when both annotations "
-            + "are present the zero-allocation contract is silently ignored. Whichever precedence "
-            + "is chosen should be deliberate and documented, and arguably this should be an error")
-    void reportsAConflictWhenBothAnnotationsAreOnOneMethod() {
+void reportsAConflictWhenBothAnnotationsAreOnOneMethod() {
         List<Finding> conflict = findings(AnnotationSemantics.BothOnOneMethod.class);
 
-        assertTrue(conflict.stream().anyMatch(f -> f.kind() == Finding.Kind.ZERO_ALLOCATION_VIOLATION),
-                () -> "the stricter contract should not be silently dropped: " + conflict);
+        assertEquals(1, conflict.size(), () -> "expected one conflict finding, got " + conflict);
+        assertEquals(Finding.Kind.CONFLICTING_CONTRACTS, conflict.get(0).kind(),
+                "the two contracts contradict each other; picking one silently hides a mistake");
+        assertEquals("entry", conflict.get(0).methodName());
+    }
+
+    @Test
+    void allowsAWarmupMethodInsideAZeroAllocationType() {
+        assertEquals(List.of(), findings(AnnotationSemantics.WarmupMethodInZeroAllocationType.class),
+                "a type-level contract with a more specific method-level one is not a conflict");
     }
 
     private void assertFalseFlagged(String methodName) {

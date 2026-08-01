@@ -15,6 +15,27 @@ public class AnnotationSemantics {
         }
     }
 
+    /**
+     * A warmup method inside a zero-allocation type. Not a conflict: the type-level contract is
+     * the default and the method-level one is a deliberate, more specific exception to it.
+     */
+    @ZeroAllocations
+    public static class WarmupMethodInZeroAllocationType {
+        private Object cache;
+
+        @AllocationsForWarmup
+        public Object warm() {
+            if (cache == null) {
+                cache = new Object();
+            }
+            return cache;
+        }
+
+        public Object hot() {
+            return cache;
+        }
+    }
+
     /** A type-level {@code @ZeroAllocations} reaches the constructor and the static initialiser. */
     @ZeroAllocations
     public static class TypeLevelReachesInitialisers {
