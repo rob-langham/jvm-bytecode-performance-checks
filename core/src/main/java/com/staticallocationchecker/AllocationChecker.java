@@ -63,9 +63,19 @@ public final class AllocationChecker {
         for (ClassNode classNode : index.values()) {
             boolean typeLevel = hasAnnotation(classNode.visibleAnnotations, ZERO_ALLOCATIONS);
             for (MethodNode method : classNode.methods) {
-                if (isWarmup(classNode, method)) {
+                boolean zeroAllocations =
+                        typeLevel || hasAnnotation(method.visibleAnnotations, ZERO_ALLOCATIONS);
+                if (declaresBothContracts(method)) {
+                    // Both annotations on one declaration is a contradiction. Resolving it by
+                    // precedence would silently discard whichever contract lost, so say so instead.
+                    findings.add(new Finding(
+                            Finding.Kind.CONFLICTING_CONTRACTS,
+                            Type.getObjectType(classNode.name).getClassName(),
+                            method.name, method.desc, -1, null,
+                            List.of(signature(classNode, method))));
+                } else if (isWarmup(classNode, method)) {
                     analyzeWarmupMethod(classNode, method, index, findings);
-                } else if (typeLevel || hasAnnotation(method.visibleAnnotations, ZERO_ALLOCATIONS)) {
+                } else if (zeroAllocations) {
                     walkEntry(classNode, method, index, hierarchy, findings);
                 }
             }
@@ -323,6 +333,18 @@ public final class AllocationChecker {
 
     private static String key(ClassNode owner, MethodNode method) {
         return owner.name + "#" + method.name + method.desc;
+    }
+
+    /**
+     * Whether one declaration carries both annotations.
+     *
+     * <p>Deliberately checks the method's own annotations only. A type-level annotation of one kind
+     * with a method-level annotation of the other is a normal, useful thing to write - a warmup
+     * method inside a zero-allocation class - where the more specific declaration simply wins.
+     */
+    private static boolean declaresBothContracts(MethodNode method) {
+        return hasAnnotation(method.visibleAnnotations, ZERO_ALLOCATIONS)
+                && hasAnnotation(method.visibleAnnotations, ALLOCATIONS_FOR_WARMUP);
     }
 
     private static boolean isWarmup(ClassNode owner, MethodNode method) {

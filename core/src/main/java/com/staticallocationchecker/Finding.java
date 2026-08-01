@@ -112,5 +112,11 @@ public final class Finding {
         WARMUP_NOT_GUARDED,
         WARMUP_NOT_CACHED,
         UNANALYZABLE_CALL,
+        /**
+         * A method claims both contracts at once. They contradict each other - one forbids
+         * allocation, the other permits it under conditions - so the declaration is a mistake
+         * rather than something to resolve by picking a winner.
+         */
+        CONFLICTING_CONTRACTS,
     }
 }

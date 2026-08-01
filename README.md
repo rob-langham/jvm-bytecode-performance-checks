@@ -85,6 +85,11 @@ them. Give the checker more roots and they resolve.
 The same kind is also reported for a warmup method whose dataflow analysis fails, so an
 unanalysable method is never mistaken for a compliant one.
 
+A sixth kind, `CONFLICTING_CONTRACTS`, is reported when one declaration carries both annotations.
+They contradict each other, so the declaration is treated as a mistake rather than resolved by
+precedence. Putting `@AllocationsForWarmup` on a method inside a `@ZeroAllocations` type is *not* a
+conflict — that is a deliberate, more specific exception, and the method-level contract wins.
+
 ## Usage
 
 ### Gradle
@@ -173,7 +178,6 @@ Known gaps, each tracked as an issue and pinned by a `@Disabled` test that names
 | --- | --- |
 | [#4](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/4) | An override silently drops the `@ZeroAllocations` contract |
 | [#6](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/6) | `VARARGS_ARRAY` is declared but never produced |
-| [#7](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/7) | Both annotations on one method: warmup silently wins |
 | [#8](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/8) | Gradle task takes no configuration and passes silently with no classes directory |
 | [#9](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/9) | Maven mojo takes no parameters and fails with an internal exception |
 
