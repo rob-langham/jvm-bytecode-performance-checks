@@ -14,7 +14,6 @@ import java.util.jar.Attributes;
 import java.util.jar.JarFile;
 import java.util.jar.Manifest;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -55,9 +54,6 @@ class JavaAgentEndToEndTest {
     }
 
     @Test
-    @Disabled("GAP: the root cause of the failure below. An agent jar is loaded by the system class "
-            + "loader with only itself appended to the class path, so it must carry its own "
-            + "dependencies or name them in a Class-Path manifest entry. This one does neither")
     void agentJarCarriesTheDependenciesItNeedsAtRuntime() throws IOException {
         try (JarFile jar = new JarFile(agentJar.toFile())) {
             boolean bundlesAsm = jar.stream().anyMatch(e -> e.getName().endsWith(".class")
@@ -73,12 +69,6 @@ class JavaAgentEndToEndTest {
 
     @Test
     @Timeout(120)
-    @Disabled("GAP: the agent does nothing at all in a real launch. The jar bundles no ASM and its "
-            + "manifest declares no Class-Path, so on the system class path org.objectweb.asm.* is "
-            + "absent; every transform() call dies with NoClassDefFoundError, which the catch-all "
-            + "in WarmupClassFileTransformer swallows into a silent 'no transformation'. The fix is "
-            + "a shaded/fat agent jar (plus letting the transformer report failures rather than "
-            + "discarding them). Verified by hand: TOTAL=0, SITES=0, and every class load throws")
     void agentInstrumentsWarmupMethodsInARealJvmLaunch() throws Exception {
         List<String> output = runJvmWithAgent();
 

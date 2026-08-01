@@ -1,5 +1,6 @@
 plugins {
     `java-library`
+    id("com.gradleup.shadow") version "8.3.5"
 }
 
 val asmVersion = "9.7.1"
@@ -33,7 +34,7 @@ val agentTestTask = tasks.register<Test>("agentTest") {
     classpath = agentTest.runtimeClasspath
     useJUnitPlatform()
 
-    val jarTask = tasks.jar
+    val jarTask = tasks.shadowJar
     dependsOn(jarTask)
     // The harness runs with ONLY its own classes on the classpath: everything else must come from
     // the agent jar, which the JVM appends to the system class path.
@@ -49,7 +50,21 @@ tasks.check {
     dependsOn(agentTestTask)
 }
 
-tasks.jar {
+// The agent jar and the library jar are different artifacts with different rules.
+//
+// The library jar is consumed by the build plugins, which resolve ASM as a normal transitive
+// dependency, so it must stay a plain thin jar and must NOT advertise agent entry points it
+// cannot honour.
+//
+// The agent jar is appended to the system class path by the JVM with nothing else alongside it,
+// so it has to carry every class it touches at transform time - ASM included. Those classes are
+// relocated, because an agent that put its own org.objectweb.asm on the system class path would
+// collide with whatever version the host application already uses.
+val shadedAsmPackage = "com.staticallocationchecker.shaded.asm"
+
+tasks.shadowJar {
+    archiveClassifier.set("agent")
+    relocate("org.objectweb.asm", shadedAsmPackage)
     manifest {
         attributes(
             "Premain-Class" to "com.staticallocationchecker.instrument.AllocationFlightAgent",
@@ -58,4 +73,8 @@ tasks.jar {
             "Can-Redefine-Classes" to "true",
         )
     }
+}
+
+tasks.assemble {
+    dependsOn(tasks.shadowJar)
 }
