@@ -125,6 +125,9 @@ only happens once in practice. A separate agent jar does that:
 java -javaagent:core/build/libs/core-0.1.0-SNAPSHOT-agent.jar -jar your-app.jar
 ```
 
+Attaching to a running JVM works too: classes already loaded are retransformed on attach, since
+those are usually the ones worth observing.
+
 It instruments `@AllocationsForWarmup` methods at class-load time to count their allocation sites,
 and exposes the counts over JMX via `AllocationFlightRecorderMXBean` — total allocations, and a
 per-site record with count and first/last-seen timestamps. A warmup site whose count keeps climbing
@@ -162,7 +165,6 @@ Known gaps, each tracked as an issue and pinned by a `@Disabled` test that names
 | | Gap |
 | --- | --- |
 | [#2](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/2) | Lambda bodies are not instrumented, so warmup work inside a lambda records nothing |
-| [#3](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/3) | Dynamic attach instruments nothing already loaded |
 | [#4](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/4) | An override silently drops the `@ZeroAllocations` contract |
 | [#6](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/6) | `VARARGS_ARRAY` is declared but never produced |
 | [#7](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/7) | Both annotations on one method: warmup silently wins |

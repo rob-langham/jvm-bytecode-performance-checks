@@ -82,11 +82,7 @@ class AllocationFlightAgentTest {
     }
 
     @Test
-    @Disabled("GAP: the jar declares Can-Retransform-Classes and an Agent-Class, but install() only "
-            + "calls addTransformer - it never calls retransformClasses. Attaching to a running JVM "
-            + "therefore instruments nothing already loaded, which in a warmup-monitoring tool is "
-            + "precisely the classes you attached in order to observe")
-    void agentmainRetransformsAlreadyLoadedWarmupClasses() throws Exception {
+void agentmainRetransformsAlreadyLoadedWarmupClasses() throws Exception {
         List<ClassFileTransformer> added = new ArrayList<>();
         List<String> retransformed = new ArrayList<>();
         java.lang.instrument.Instrumentation inst = recordingInstrumentation(added, retransformed);
