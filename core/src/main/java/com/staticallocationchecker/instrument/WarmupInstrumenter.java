@@ -2,12 +2,12 @@ package com.staticallocationchecker.instrument;
 
 import com.staticallocationchecker.AllocationCategory;
 import com.staticallocationchecker.Allocations;
+import com.staticallocationchecker.TypeOracle;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.function.Predicate;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Handle;
@@ -40,14 +40,19 @@ public final class WarmupInstrumenter {
             "com/staticallocationchecker/runtime/AllocationFlightRecorder";
     private static final String LAMBDA_METAFACTORY = "java/lang/invoke/LambdaMetafactory";
 
-    private final ClassLoader resolutionLoader;
+    /**
+     * The same classification the static checker uses. Sharing it is the point: the two used to
+     * resolve types independently, so a class could be exempt at build time and recorded at
+     * runtime with nothing to catch the disagreement.
+     */
+    private final TypeOracle oracle;
 
     /**
-     * @param resolutionLoader classloader used to resolve allocated types for the Throwable-exemption
-     *                         check (typically the loader that will define the instrumented class)
+     * @param resolutionLoader classloader used to resolve the types classification depends on -
+     *                         typically the loader that will define the instrumented class
      */
     public WarmupInstrumenter(ClassLoader resolutionLoader) {
-        this.resolutionLoader = resolutionLoader;
+        this.oracle = TypeOracle.forClassLoader(resolutionLoader);
     }
 
     /** Returns instrumented bytecode, or null if the class has no warmup allocation sites. */
@@ -123,8 +128,6 @@ public final class WarmupInstrumenter {
 
     private boolean instrumentMethod(ClassNode classNode, MethodNode method) {
         String binaryClass = Type.getObjectType(classNode.name).getClassName();
-        Predicate<String> isThrowable = name -> Allocations.isThrowableByReflection(name, resolutionLoader);
-        Predicate<MethodInsnNode> isVarargs = call -> Allocations.isVarargsByReflection(call, resolutionLoader);
         boolean changed = false;
         int line = -1;
         AbstractInsnNode[] original = method.instructions.toArray();
@@ -134,7 +137,7 @@ public final class WarmupInstrumenter {
                 line = lineNode.line;
                 continue;
             }
-            AllocationCategory category = Allocations.categoryOf(insn, isThrowable, isVarargs);
+            AllocationCategory category = oracle.categoryOf(insn);
             if (category == null) {
                 continue;
             }
