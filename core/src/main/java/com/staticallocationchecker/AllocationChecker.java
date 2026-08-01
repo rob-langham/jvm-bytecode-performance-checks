@@ -77,6 +77,10 @@ public final class AllocationChecker {
                     analyzeWarmupMethod(classNode, method, index, findings);
                 } else if (zeroAllocations) {
                     walkEntry(classNode, method, index, hierarchy, findings);
+                } else if (inherits(hierarchy, classNode, method, ALLOCATIONS_FOR_WARMUP)) {
+                    analyzeWarmupMethod(classNode, method, index, findings);
+                } else if (inherits(hierarchy, classNode, method, ZERO_ALLOCATIONS)) {
+                    walkEntry(classNode, method, index, hierarchy, findings);
                 }
             }
         }
@@ -345,6 +349,20 @@ public final class AllocationChecker {
     private static boolean declaresBothContracts(MethodNode method) {
         return hasAnnotation(method.visibleAnnotations, ZERO_ALLOCATIONS)
                 && hasAnnotation(method.visibleAnnotations, ALLOCATIONS_FOR_WARMUP);
+    }
+
+    /**
+     * Whether a supertype declares this method under the given contract.
+     *
+     * <p>Only consulted when neither the method nor its type declares a contract of its own, so a
+     * declaration always beats an inherited one and this can never override an explicit choice.
+     */
+    private static boolean inherits(
+            ClassHierarchy hierarchy, ClassNode owner, MethodNode method, String annotation) {
+        if (method.name.startsWith("<")) {
+            return false; // constructors and initialisers are not overrides
+        }
+        return hierarchy.inheritsAnnotation(owner.name, method.name, method.desc, annotation);
     }
 
     private static boolean isWarmup(ClassNode owner, MethodNode method) {

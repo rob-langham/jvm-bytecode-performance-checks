@@ -1,6 +1,8 @@
 package com.staticallocationchecker;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -101,6 +103,52 @@ final class ClassHierarchy {
             targets.addAll(overridesOf(owner, name, descriptor));
         }
         return List.copyOf(targets);
+    }
+
+    /**
+     * Whether a strict supertype declares this method carrying the given annotation.
+     *
+     * <p>Java does not inherit annotations onto an override, so without this an override silently
+     * drops whatever contract its supertype declared - the easiest way for a codebase to lose
+     * coverage without anyone noticing.
+     */
+    boolean inheritsAnnotation(String owner, String name, String descriptor, String annotationDescriptor) {
+        Set<String> visited = new LinkedHashSet<>();
+        Deque<String> pending = new ArrayDeque<>();
+        ClassNode start = index.get(owner);
+        if (start == null) {
+            return false;
+        }
+        enqueueSupertypes(start, pending);
+        while (!pending.isEmpty()) {
+            String supertype = pending.poll();
+            if (!visited.add(supertype)) {
+                continue;
+            }
+            ClassNode node = index.get(supertype);
+            if (node == null) {
+                continue;
+            }
+            MethodNode declared = findDeclared(node, name, descriptor);
+            if (declared != null && hasAnnotation(declared, annotationDescriptor)) {
+                return true;
+            }
+            enqueueSupertypes(node, pending);
+        }
+        return false;
+    }
+
+    private static void enqueueSupertypes(ClassNode node, Deque<String> pending) {
+        if (node.superName != null) {
+            pending.add(node.superName);
+        }
+        pending.addAll(node.interfaces);
+    }
+
+    private static boolean hasAnnotation(MethodNode method, String annotationDescriptor) {
+        return method.visibleAnnotations != null
+                && method.visibleAnnotations.stream()
+                        .anyMatch(a -> annotationDescriptor.equals(a.desc));
     }
 
     /** The method a call site resolves to by declaration, climbing superclasses then interfaces. */

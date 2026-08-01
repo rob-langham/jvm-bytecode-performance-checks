@@ -37,6 +37,10 @@ The implicit array javac synthesises at a varargs call site is caught too, curre
 `NEW_ARRAY`. (`AllocationCategory` declares a `VARARGS_ARRAY` constant that nothing yet produces —
 see Status.)
 
+A contract declared on a supertype method - including on an interface - applies to overrides that
+do not repeat the annotation, since Java itself does not inherit annotations. An override that
+declares a contract of its own always wins over the inherited one.
+
 Resolution follows the call, not just the declaration: a call site is walked through every
 implementation reachable from it that is present in the analysis roots, so an allocation in an
 interface implementation or an inherited method is found and attributed to the method that
@@ -176,7 +180,6 @@ Known gaps, each tracked as an issue and pinned by a `@Disabled` test that names
 
 | | Gap |
 | --- | --- |
-| [#4](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/4) | An override silently drops the `@ZeroAllocations` contract |
 | [#6](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/6) | `VARARGS_ARRAY` is declared but never produced |
 | [#8](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/8) | Gradle task takes no configuration and passes silently with no classes directory |
 | [#9](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/9) | Maven mojo takes no parameters and fails with an internal exception |

@@ -103,4 +103,32 @@ public class AnnotationSemantics {
             return new Object();
         }
     }
+
+    /** An interface can declare the contract its implementations must honour. */
+    public interface AnnotatedInterface {
+        @ZeroAllocations
+        Object handle();
+    }
+
+    /** Implements an annotated interface method without repeating the annotation. */
+    public static class UnannotatedImplementation implements AnnotatedInterface {
+        @Override
+        public Object handle() {
+            return new Object();
+        }
+    }
+
+    /** An override that declares its own, different contract: the declaration should win. */
+    public static class OverrideDeclaringItsOwnContract extends AnnotatedParent {
+        private Object cache;
+
+        @Override
+        @AllocationsForWarmup
+        public Object make() {
+            if (cache == null) {
+                cache = new Object();
+            }
+            return cache;
+        }
+    }
 }
