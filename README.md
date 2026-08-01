@@ -6,6 +6,10 @@ transitively — failing the build on any heap allocation it finds.
 
 Built on [ASM](https://asm.ow2.io/). Requires Java 17+.
 
+📖 **[Full documentation](https://rob-langham.github.io/jvm-bytecode-performance-checks/)** — setup,
+best practices, and a worked example for every kind of allocation: the Java source, the bytecode it
+compiles to, and what the checker reports.
+
 ## Why
 
 On a latency-sensitive path, an allocation is a future GC pause. Code review catches the obvious
@@ -129,6 +133,9 @@ It instruments `@AllocationsForWarmup` methods at class-load time to count their
 and exposes the counts over JMX via `AllocationFlightRecorderMXBean` — total allocations, and a
 per-site record with count and first/last-seen timestamps. A warmup site whose count keeps climbing
 in steady state is a bug the static checker cannot see.
+
+`examples/steady-state-demo` is a runnable demonstration: two hot paths that the static checker
+cannot tell apart, one of which warms up and one of which allocates forever.
 
 The agent is a distinct artifact from the library jar, built with its dependencies bundled and ASM
 relocated under `com.staticallocationchecker.shaded.asm`. A `-javaagent` jar is appended to the
