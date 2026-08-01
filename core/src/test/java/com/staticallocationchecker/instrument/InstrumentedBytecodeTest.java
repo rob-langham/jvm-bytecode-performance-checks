@@ -16,6 +16,7 @@ import com.staticallocationchecker.runtime.AllocationFlightRecorder;
 import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -128,10 +129,6 @@ class InstrumentedBytecodeTest {
     }
 
     @Test
-    @Disabled("GAP: a lambda body compiles to a synthetic lambda$... method that does not carry the "
-            + "@AllocationsForWarmup annotation, so allocations inside the body are never "
-            + "instrumented. A warmup method that does its work inside a lambda records nothing, "
-            + "and a lambda still firing in steady state is invisible to the recorder")
     void instrumentsAllocationInsideALambdaBody() throws Exception {
         Class<?> loaded = instrumentAndLoad(ComplexControlFlow.class);
         Object target = loaded.getDeclaredConstructor().newInstance();
@@ -143,6 +140,48 @@ class InstrumentedBytecodeTest {
 
         assertTrue(recorder.total() > afterCreation,
                 "the allocation inside the lambda body should be recorded when the body runs");
+    }
+
+    @Test
+    void attributesALambdaBodyAllocationToTheSyntheticMethodThatContainsIt() throws Exception {
+        Class<?> loaded = instrumentAndLoad(ComplexControlFlow.class);
+        Object target = loaded.getDeclaredConstructor().newInstance();
+
+        Runnable r = (Runnable) loaded.getMethod("nestedLambda", StringBuilder.class)
+                .invoke(target, new StringBuilder());
+        r.run();
+
+        assertTrue(recorder.snapshot().keySet().stream().anyMatch(k -> k.contains("#lambda$")),
+                () -> "a lambda body's allocation belongs to the lambda, not its enclosing method, "
+                        + "because the body can run long after warmup: " + recorder.snapshot().keySet());
+    }
+
+    @Test
+    void doesNotInstrumentAnOrdinaryMethodJustBecauseAWarmupMethodReferencesIt() throws Exception {
+        Class<?> loaded = instrumentAndLoad(ComplexControlFlow.class);
+        Object target = loaded.getDeclaredConstructor().newInstance();
+
+        Supplier<?> supplier = (Supplier<?>) loaded.getMethod("viaMethodReference").invoke(target);
+        long afterCreation = recorder.total();
+        supplier.get();
+
+        assertEquals(afterCreation, recorder.total(),
+                "the referenced method is ordinary code with its own contract, not warmup code");
+    }
+
+    @Test
+    void instrumentsLambdaBodiesTransitively() throws Exception {
+        Class<?> loaded = instrumentAndLoad(ComplexControlFlow.class);
+        Object target = loaded.getDeclaredConstructor().newInstance();
+
+        Supplier<?> outer = (Supplier<?>) loaded.getMethod("nestedLambdaInLambda", StringBuilder.class)
+                .invoke(target, new StringBuilder());
+        Runnable inner = (Runnable) outer.get();
+        long beforeBody = recorder.total();
+        inner.run();
+
+        assertTrue(recorder.total() > beforeBody,
+                "an allocation two lambda levels deep is still inside the warmup method's work");
     }
 
     @Test
