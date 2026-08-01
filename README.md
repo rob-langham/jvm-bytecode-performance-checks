@@ -102,7 +102,7 @@ conflict — that is a deliberate, more specific exception, and the method-level
 
 ```kotlin
 plugins {
-    id("com.staticallocationchecker.static-allocation-checker")
+    id("io.github.rob-langham.static-allocation-checker")
 }
 ```
 
@@ -196,10 +196,11 @@ the tool should have and names what it is waiting on, so the suite doubles as th
 
 ## Status
 
-Early — `0.1.0-SNAPSHOT`. Nothing is published to an artifact repository yet, and no
-`maven-publish` configuration exists, so the Gradle and Maven snippets above describe the plugins'
-intended coordinates rather than something you can resolve today; consume the project via a
-composite build (`includeBuild`) for now.
+Early — `0.1.0`. Publishing is fully configured for Maven Central and the Gradle Plugin Portal
+under `io.github.rob-langham`, but **nothing has been released yet**: it needs namespace
+verification, a signing key and credentials, which only the repository owner can do. See
+[PUBLISHING.md](PUBLISHING.md). Until then, consume the project via a composite build
+(`includeBuild`), as [`demo/`](demo) does.
 
 All eight gaps tracked after the first review round are now closed. `resolveClasspath` is accepted
 by the checker but still unused for widening callee resolution; the plugins pass it through ready

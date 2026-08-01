@@ -1,10 +1,10 @@
 plugins {
     java
-    id("com.staticallocationchecker.static-allocation-checker")
+    id("io.github.rob-langham.static-allocation-checker")
 }
 
 dependencies {
-    implementation("com.staticallocationchecker:core:${project.extra["checkerVersion"]}")
+    implementation("io.github.rob-langham:core:${project.extra["checkerVersion"]}")
 }
 
 java {

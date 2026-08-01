@@ -22,7 +22,7 @@ class StaticAllocationCheckerPluginTest {
 
     private Project projectWith(Path projectDir) {
         Project project = ProjectBuilder.builder().withProjectDir(projectDir.toFile()).build();
-        project.getPlugins().apply("com.staticallocationchecker.static-allocation-checker");
+        project.getPlugins().apply("io.github.rob-langham.static-allocation-checker");
         return project;
     }
 

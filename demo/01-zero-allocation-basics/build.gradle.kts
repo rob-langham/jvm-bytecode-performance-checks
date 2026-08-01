@@ -1,11 +1,11 @@
 plugins {
     java
-    id("com.staticallocationchecker.static-allocation-checker")
+    id("io.github.rob-langham.static-allocation-checker")
 }
 
 dependencies {
     // The annotations. Nothing else is needed at compile time.
-    implementation("com.staticallocationchecker:core:${project.extra["checkerVersion"]}")
+    implementation("io.github.rob-langham:core:${project.extra["checkerVersion"]}")
 }
 
 java {

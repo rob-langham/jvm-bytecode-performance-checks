@@ -45,11 +45,11 @@ Each scenario's build file is the whole story — three lines of it:
 ```kotlin
 plugins {
     java
-    id("com.staticallocationchecker.static-allocation-checker")
+    id("io.github.rob-langham.static-allocation-checker")
 }
 
 dependencies {
-    implementation("com.staticallocationchecker:core:0.1.0-SNAPSHOT")  // the annotations
+    implementation("io.github.rob-langham:core:0.1.0")  // the annotations
 }
 ```
 
@@ -76,7 +76,7 @@ the annotations out of the sibling build:
 pluginManagement {
     includeBuild("..")   // makes the plugin id resolvable
 }
-includeBuild("..")       // substitutes com.staticallocationchecker:core
+includeBuild("..")       // substitutes io.github.rob-langham:core
 ```
 
 Both lines are needed — they are separate mechanisms, and `pluginManagement` alone resolves the

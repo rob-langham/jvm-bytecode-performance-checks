@@ -12,7 +12,7 @@ pluginManagement {
     }
 }
 
-// Included again at the top level, which is what substitutes the `com.staticallocationchecker:core`
+// Included again at the top level, which is what substitutes the `io.github.rob-langham:core`
 // dependency for the sibling build's project. The pluginManagement include above covers plugin
 // resolution only - the two are separate mechanisms.
 includeBuild("..")
