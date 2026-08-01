@@ -19,6 +19,14 @@ relative_links:
 
 permalink: pretty
 
+# Jekyll does not read a theme's own _config.yml, so the theme layout has to be
+# applied here. Without this every page renders as bare HTML with no nav or search.
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+
 aux_links:
   GitHub: https://github.com/rob-langham/jvm-bytecode-performance-checks
 aux_links_new_tab: true
