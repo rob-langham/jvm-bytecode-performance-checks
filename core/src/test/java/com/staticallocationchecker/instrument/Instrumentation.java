@@ -1,9 +1,36 @@
 package com.staticallocationchecker.instrument;
 
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.LineNumberNode;
+import org.objectweb.asm.tree.MethodNode;
+
 /** Test helpers for instrumenting, loading and invoking fixture classes in-memory. */
 final class Instrumentation {
 
     private Instrumentation() {
+    }
+
+    /**
+     * The same class with every {@code LineNumberNode} removed, as if compiled without debug
+     * information. Allocation site keys then carry a line of -1.
+     */
+    static byte[] stripLineNumbers(byte[] classBytes) {
+        ClassReader reader = new ClassReader(classBytes);
+        ClassNode classNode = new ClassNode();
+        reader.accept(classNode, 0);
+        for (MethodNode method : classNode.methods) {
+            for (AbstractInsnNode insn : method.instructions.toArray()) {
+                if (insn instanceof LineNumberNode) {
+                    method.instructions.remove(insn);
+                }
+            }
+        }
+        ClassWriter writer = new ClassWriter(reader, 0);
+        classNode.accept(writer);
+        return writer.toByteArray();
     }
 
     /** The raw bytecode of an already-compiled class, read from the test classpath. */

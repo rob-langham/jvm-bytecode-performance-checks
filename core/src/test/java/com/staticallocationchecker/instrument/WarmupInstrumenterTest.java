@@ -16,17 +16,27 @@ import com.staticallocationchecker.runtime.SiteRecord;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class WarmupInstrumenterTest {
 
     private AllocationFlightRecorder recorder;
+    private AllocationFlightRecorder previous;
 
     @BeforeEach
     void installRecorder() {
+        previous = AllocationFlightRecorder.instance();
         recorder = new AllocationFlightRecorder(() -> 1_000L);
         AllocationFlightRecorder.install(recorder);
+    }
+
+    @AfterEach
+    void restoreRecorder() {
+        // The recorder is process-wide static state; leaving a test's recorder installed makes
+        // every later test in the JVM order-dependent.
+        AllocationFlightRecorder.install(previous);
     }
 
     private Object instrumentAndInvoke(Class<?> fixture, String method) throws Exception {

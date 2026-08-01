@@ -27,8 +27,16 @@ method and every method it calls transitively, reporting each allocation site:
 | `NEW_ARRAY` | `new int[8]` |
 | `BOXING` | `Integer.valueOf(i)`, autoboxing into a collection |
 | `STRING_CONCAT` | `"a" + b` |
-| `VARARGS_ARRAY` | the implicit array at a varargs call site |
 | `LAMBDA` | a capturing lambda or method reference, which allocates per evaluation |
+
+The implicit array javac synthesises at a varargs call site is caught too, currently reported as
+`NEW_ARRAY`. (`AllocationCategory` declares a `VARARGS_ARRAY` constant that nothing yet produces —
+see Status.)
+
+Resolution follows the call, not just the declaration: a call site is walked through every
+implementation reachable from it that is present in the analysis roots, so an allocation in an
+interface implementation or an inherited method is found and attributed to the method that
+actually contains it.
 
 Two things are deliberately exempt. Allocations of `Throwable` subtypes are allowed — the
 exceptional path is not the hot path. So are allocations behind an `@AllocationsForWarmup`
@@ -64,12 +72,14 @@ ZERO_ALLOCATION_VIOLATION  BOXING  OrderBook#onTick(J)V:142
   OrderBook#onTick(J)V -> PriceLevels#lookup(J)LLevel; -> java.util.HashMap#get(...)
 ```
 
-A fifth kind, `UNANALYZABLE_CALL`, is reported when a callee is not on the analysis roots and so
-cannot be walked. This is a soft spot worth being explicit about: the checker indexes only the
-class files you point it at. A call into a third-party jar is reported as unanalyzable rather than
-silently assumed clean — but it is reported once per site, and a codebase with a wide dependency
-surface will see a lot of them. Virtual dispatch is likewise resolved against the declared owner
-only; an override in an unindexed subclass is not followed.
+A fifth kind, `UNANALYZABLE_CALL`, is reported when nothing the call could reach is present in the
+analysis roots — a call into a third-party jar, or an interface whose implementations you did not
+point the checker at. Such a call is flagged rather than assumed clean, which is the right default
+for a verification tool but does mean a codebase with a wide dependency surface will see a lot of
+them. Give the checker more roots and they resolve.
+
+The same kind is also reported for a warmup method whose dataflow analysis fails, so an
+unanalysable method is never mistaken for a compliant one.
 
 ## Usage
 
@@ -108,16 +118,22 @@ report.findings().forEach(System.out::println);
 ## Runtime flight recorder
 
 Static analysis proves a warmup allocation *can* only happen on a guarded path; it cannot prove it
-only happens once in practice. The core jar doubles as a Java agent for that:
+only happens once in practice. A separate agent jar does that:
 
 ```
-java -javaagent:core.jar -jar your-app.jar
+./gradlew :core:shadowJar
+java -javaagent:core/build/libs/core-0.1.0-SNAPSHOT-agent.jar -jar your-app.jar
 ```
 
 It instruments `@AllocationsForWarmup` methods at class-load time to count their allocation sites,
 and exposes the counts over JMX via `AllocationFlightRecorderMXBean` — total allocations, and a
 per-site record with count and first/last-seen timestamps. A warmup site whose count keeps climbing
 in steady state is a bug the static checker cannot see.
+
+The agent is a distinct artifact from the library jar, built with its dependencies bundled and ASM
+relocated under `com.staticallocationchecker.shaded.asm`. A `-javaagent` jar is appended to the
+system class path with nothing beside it, so it has to be self-contained — and it must not put its
+own copy of ASM where it could collide with the host application's.
 
 ## Building
 
@@ -127,13 +143,35 @@ in steady state is a bug the static checker cannot see.
 
 Modules: `core` (analyser, annotations, agent, recorder), `gradle-plugin`, `maven-plugin`.
 
+`./gradlew build` runs 150 tests, including `:core:agentTest`, which launches a real JVM with
+`-javaagent` and asserts on what the agent recorded — the only way to cover the manifest
+attributes, class-load-time transformation and the agent jar being self-sufficient.
+
+Some tests are `@Disabled` with a `GAP:` reason. Those are not broken tests: each states behaviour
+the tool should have and names what it is waiting on, so the suite doubles as the work list.
+
 ## Status
 
 Early — `0.1.0-SNAPSHOT`. Nothing is published to an artifact repository yet, and no
 `maven-publish` configuration exists, so the Gradle and Maven snippets above describe the plugins'
 intended coordinates rather than something you can resolve today; consume the project via a
-composite build (`includeBuild`) for now. The `resolveClasspath` parameter on `analyze` is accepted
-but not yet used to widen callee resolution.
+composite build (`includeBuild`) for now.
+
+Known gaps, each tracked as an issue and pinned by a `@Disabled` test that names it:
+
+| | Gap |
+| --- | --- |
+| [#2](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/2) | Lambda bodies are not instrumented, so warmup work inside a lambda records nothing |
+| [#3](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/3) | Dynamic attach instruments nothing already loaded |
+| [#4](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/4) | An override silently drops the `@ZeroAllocations` contract |
+| [#5](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/5) | Neither annotation can be applied to a constructor |
+| [#6](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/6) | `VARARGS_ARRAY` is declared but never produced |
+| [#7](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/7) | Both annotations on one method: warmup silently wins |
+| [#8](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/8) | Gradle task takes no configuration and passes silently with no classes directory |
+| [#9](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/9) | Maven mojo takes no parameters and fails with an internal exception |
+
+The `resolveClasspath` parameter on `analyze` is accepted but not yet used to widen callee
+resolution.
 
 ## Licence
 
