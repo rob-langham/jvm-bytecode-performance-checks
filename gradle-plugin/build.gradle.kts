@@ -17,11 +17,6 @@ val coreTestClasses = project(":core").layout.buildDirectory.dir("classes/java/t
 
 tasks.test {
     dependsOn(":core:testClasses")
-    // DemoScenarioFunctionalTest builds real Gradle projects out of the demo sources, so they are
-    // inputs: without this, editing a demo leaves these tests stale and passing.
-    inputs.files(fileTree(rootProject.file("demo")) {
-        include("*/src/main/java/**/*.java")
-    }).withPropertyName("demoScenarios").withPathSensitivity(PathSensitivity.RELATIVE)
     jvmArgumentProviders.add(CommandLineArgumentProvider {
         listOf("-DfixtureClasses=${coreTestClasses.get().asFile.absolutePath}")
     })

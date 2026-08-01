@@ -63,6 +63,28 @@ public final class AllocationChecker {
      * @return the findings
      */
     public Report analyze(List<Path> analysisRoots, List<Path> resolveClasspath) {
+        return analyze(analysisRoots, resolveClasspath, List.of());
+    }
+
+    /**
+     * Analyses starting from named entry points rather than from annotated methods.
+     *
+     * <p>Annotations are the right way to state a contract in code you own, but they are not always
+     * available or appropriate: generated code, a dependency you cannot edit, or simply asking
+     * "what does this one method allocate?" without committing the answer to a source file. Naming
+     * the starting point covers those.
+     *
+     * <p>When {@code entryPoints} is non-empty, discovery by annotation is skipped entirely and
+     * only the named methods are walked. That is deliberate - the point of naming a starting point
+     * is to analyse <em>that</em>, not that plus whatever else happens to be annotated nearby.
+     * Warmup methods still act as boundaries wherever the walk reaches one.
+     *
+     * @param entryPoints methods to start from, as {@code binary.ClassName},
+     *                    {@code binary.ClassName#method}, or {@code binary.ClassName#method(desc)}
+     *                    for an exact overload
+     */
+    public Report analyze(
+            List<Path> analysisRoots, List<Path> resolveClasspath, List<String> entryPoints) {
         Map<String, ClassNode> analysisIndex = buildIndex(analysisRoots);
 
         // Resolution sees both, with the analysis roots winning any clash: if the same class is on
@@ -72,6 +94,12 @@ public final class AllocationChecker {
 
         ClassHierarchy hierarchy = new ClassHierarchy(index);
         List<Finding> findings = new ArrayList<>();
+
+        if (!entryPoints.isEmpty()) {
+            walkNamedEntryPoints(entryPoints, analysisIndex, index, hierarchy, findings);
+            return new Report(findings);
+        }
+
         for (ClassNode classNode : analysisIndex.values()) {
             boolean typeLevel = hasAnnotation(classNode.visibleAnnotations, ZERO_ALLOCATIONS);
             for (MethodNode method : classNode.methods) {
@@ -97,6 +125,90 @@ public final class AllocationChecker {
             }
         }
         return new Report(findings);
+    }
+
+    /**
+     * Walks every method matching a named entry point.
+     *
+     * <p>An entry point that matches nothing is an error rather than an empty result. A typo in a
+     * class name would otherwise produce a clean report for code that was never looked at, which is
+     * the failure this tool exists to prevent - and it would look exactly like success.
+     */
+    private void walkNamedEntryPoints(
+            List<String> entryPoints,
+            Map<String, ClassNode> analysisIndex,
+            Map<String, ClassNode> index,
+            ClassHierarchy hierarchy,
+            List<Finding> findings) {
+        for (String spec : entryPoints) {
+            EntryPointSpec parsed = EntryPointSpec.parse(spec);
+            int matched = 0;
+            for (ClassNode classNode : analysisIndex.values()) {
+                if (!parsed.matchesClass(classNode)) {
+                    continue;
+                }
+                for (MethodNode method : classNode.methods) {
+                    if (!parsed.matchesMethod(method)) {
+                        continue;
+                    }
+                    matched++;
+                    if (isWarmup(classNode, method)) {
+                        analyzeWarmupMethod(classNode, method, index, findings);
+                    } else {
+                        walkEntry(classNode, method, index, hierarchy, findings);
+                    }
+                }
+            }
+            if (matched == 0) {
+                throw new IllegalArgumentException(
+                        "Entry point '" + spec + "' matched nothing in the analysis roots. "
+                                + "Reporting no findings for it would be indistinguishable from "
+                                + "having checked it and found none.");
+            }
+        }
+    }
+
+    /** A parsed {@code Class}, {@code Class#method} or {@code Class#method(descriptor)} selector. */
+    private static final class EntryPointSpec {
+        private final String internalClassName;
+        private final String methodName;
+        private final String descriptor;
+
+        private EntryPointSpec(String internalClassName, String methodName, String descriptor) {
+            this.internalClassName = internalClassName;
+            this.methodName = methodName;
+            this.descriptor = descriptor;
+        }
+
+        static EntryPointSpec parse(String spec) {
+            String trimmed = spec.trim();
+            if (trimmed.isEmpty()) {
+                throw new IllegalArgumentException("Empty entry point specification");
+            }
+            int hash = trimmed.indexOf('#');
+            if (hash < 0) {
+                return new EntryPointSpec(trimmed.replace('.', '/'), null, null);
+            }
+            String className = trimmed.substring(0, hash).replace('.', '/');
+            String member = trimmed.substring(hash + 1);
+            int paren = member.indexOf('(');
+            if (paren < 0) {
+                return new EntryPointSpec(className, member, null);
+            }
+            return new EntryPointSpec(
+                    className, member.substring(0, paren), member.substring(paren));
+        }
+
+        boolean matchesClass(ClassNode classNode) {
+            return classNode.name.equals(internalClassName);
+        }
+
+        boolean matchesMethod(MethodNode method) {
+            if (methodName != null && !method.name.equals(methodName)) {
+                return false;
+            }
+            return descriptor == null || method.desc.equals(descriptor);
+        }
     }
 
     /** Walks a single annotated entry point and everything it calls transitively. */

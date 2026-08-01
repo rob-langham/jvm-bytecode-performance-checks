@@ -193,6 +193,36 @@ them, but never scanned for annotated entry points. That distinction is the poin
 parameters — a dependency's code should be walked to find the allocation, while its own contracts
 stay somebody else's business.
 
+### Starting somewhere specific
+
+A third parameter names the methods to start from, instead of discovering them by annotation:
+
+```java
+Report report = new AllocationChecker().analyze(
+        List.of(Path.of("build/classes/java/main")),
+        List.of(),
+        List.of("com.example.OrderBook#onTick",          // every overload
+                "com.example.Pricing#quote(JD)D",        // one exact overload
+                "com.example.MatchingEngine"));          // every method it declares
+```
+
+Annotations are the right way to state a contract in code you own. Naming the starting point covers
+the cases where they are not available or not appropriate: generated code, a dependency you cannot
+edit, or simply asking *what does this one method allocate?* without committing the answer to a
+source file.
+
+When entry points are named, discovery by annotation is **skipped entirely** — the point of naming a
+starting point is to analyse that, not that plus whatever else happens to be annotated nearby.
+Warmup methods still act as boundaries wherever the walk reaches one.
+
+Naming a class means every method it declares, **construction included**. That is rarely the hot
+path, so name methods when you mean methods.
+
+{: .warning }
+> An entry point that matches nothing is an error, not an empty result. A typo in a class name would
+> otherwise produce a clean report for code that was never looked at — which looks exactly like
+> success.
+
 {: .warning }
 > Giving the checker too few roots does not make it quieter — it makes it noisier. Every call it
 > cannot resolve becomes an [`UNANALYZABLE_CALL`](scenarios/unanalyzable-calls.md) finding. Point it

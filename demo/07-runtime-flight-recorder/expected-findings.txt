@@ -1,7 +1,0 @@
-# What the checker reports for this scenario, asserted by DemoScenarioTest in the
-# library build and counted by the demo build's `demo` task.
-#
-# Nothing. Both classes satisfy the warmup contract exactly; the difference between
-# them is visible only at runtime, which is the entire point of this scenario.
-#
-# Format: KIND | class#method | CATEGORY

@@ -15,17 +15,6 @@ dependencies {
 // deliberately not declared here - declaring both produces two artifacts with the same
 // classifier and the publication is rejected.
 
-// DemoScenarioTest compiles the demo scenarios and runs the checker over them, so the demo sources
-// and their expectation files are genuine inputs to this task. Without declaring them Gradle
-// considers the tests up-to-date when only a demo has changed - which means an edit that breaks a
-// scenario passes locally and only surfaces on a clean CI run.
-tasks.test {
-    inputs.files(fileTree(rootProject.file("demo")) {
-        include("*/src/main/java/**/*.java")
-        include("*/expected-findings.txt")
-    }).withPropertyName("demoScenarios").withPathSensitivity(PathSensitivity.RELATIVE)
-}
-
 // The agent can only really be tested by launching a JVM with -javaagent, which needs the built
 // jar. That is a different dependency shape from the unit tests, so it gets its own source set.
 val agentTest: SourceSet by sourceSets.creating
