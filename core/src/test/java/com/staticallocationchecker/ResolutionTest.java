@@ -26,8 +26,6 @@ class ResolutionTest {
     }
 
     @Test
-    @Disabled("GAP: virtual dispatch resolves to the abstract declaration, whose body is empty, so "
-            + "the allocation in the override is never seen and nothing is reported at all")
     void findsAllocationInAnInterfaceImplementation() {
         List<Finding> findings = findingsFor(analyze(), Dispatch.AllocatingHandler.class);
 
@@ -37,7 +35,6 @@ class ResolutionTest {
     }
 
     @Test
-    @Disabled("GAP: as above, for an abstract superclass rather than an interface")
     void findsAllocationInAnAbstractClassOverride() {
         List<Finding> findings = findingsFor(analyze(), Dispatch.Impl.class);
 
@@ -46,20 +43,35 @@ class ResolutionTest {
     }
 
     @Test
-    @Disabled("GAP: an unresolvable virtual call should at minimum be reported as UNANALYZABLE_CALL "
-            + "rather than silently treated as clean")
-    void reportsSomethingForAnUnresolvedVirtualCall() {
+    void attributesADispatchedAllocationToTheOverrideNotTheCallSite() {
         List<Finding> findings = findingsFor(analyze(), Dispatch.class);
 
-        assertEquals(2, findings.size(),
-                () -> "both dispatching entry points should produce a finding, got " + findings);
-        assertTrue(findings.stream().allMatch(f -> f.kind() == Finding.Kind.UNANALYZABLE_CALL),
-                () -> "silence is the one unacceptable outcome here: " + findings);
+        assertTrue(findings.stream().noneMatch(f -> f.methodName().equals("throughInterface")),
+                () -> "the call site itself allocates nothing: " + findings);
+        assertTrue(findings.stream().noneMatch(f -> f.methodName().equals("throughAbstractClass")),
+                () -> "the call site itself allocates nothing: " + findings);
     }
 
     @Test
-    @Disabled("GAP: findMethod searches only the ClassNode of the call site's declared owner, so a "
-            + "method inherited from an indexed superclass is neither resolved nor walked")
+    void reportsUnanalyzableWhenNoImplementationIsIndexed() {
+        List<Finding> findings = findingsFor(analyze(), Dispatch.class).stream()
+                .filter(f -> f.methodName().equals("throughUnindexedInterface"))
+                .toList();
+
+        assertEquals(1, findings.size(), () -> "expected one finding, got " + findings);
+        assertEquals(Finding.Kind.UNANALYZABLE_CALL, findings.get(0).kind(),
+                "an implementation outside the roots must be flagged, never assumed clean");
+    }
+
+    @Test
+    void walksEveryIndexedOverrideOfADispatchedCall() {
+        Report report = analyze();
+
+        assertEquals(1, findingsFor(report, Dispatch.AllocatingHandler.class).size());
+        assertEquals(1, findingsFor(report, Dispatch.Impl.class).size());
+    }
+
+    @Test
     void findsAllocationInAnInheritedMethod() {
         List<Finding> findings = findingsFor(analyze(), Inheritance.AllocatingParent.class);
 
@@ -68,8 +80,6 @@ class ResolutionTest {
     }
 
     @Test
-    @Disabled("GAP: an inherited method that is present in the analysis roots is wrongly reported "
-            + "UNANALYZABLE_CALL, which is a false positive on entirely clean code")
     void doesNotReportInheritedCleanMethodAsUnanalyzable() {
         List<Finding> findings = findingsFor(analyze(), Inheritance.class);
 

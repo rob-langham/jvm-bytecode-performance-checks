@@ -43,4 +43,10 @@ public class Dispatch {
     public Object throughAbstractClass() {
         return base.make();
     }
+
+    /** Dispatch through an interface whose implementations are outside the analysis roots. */
+    @ZeroAllocations
+    public int throughUnindexedInterface(java.util.List<String> values) {
+        return values.size();
+    }
 }

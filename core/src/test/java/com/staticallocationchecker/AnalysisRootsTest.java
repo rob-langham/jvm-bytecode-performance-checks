@@ -15,7 +15,6 @@ import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -74,9 +73,6 @@ class AnalysisRootsTest {
     }
 
     @Test
-    @Disabled("GAP: analyze() javadoc promises 'directories (or jars)', but buildIndex only walks "
-            + "the file tree for names ending in .class - a jar root silently indexes nothing and "
-            + "the tool reports a clean bill of health for code it never read")
     void analysesClassesInsideAJarRoot(@TempDir Path dir) throws IOException {
         Path jar = dir.resolve("fixtures.jar");
         try (JarOutputStream out = new JarOutputStream(Files.newOutputStream(jar))) {

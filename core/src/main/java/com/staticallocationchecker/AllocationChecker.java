@@ -1,6 +1,7 @@
 package com.staticallocationchecker;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -9,11 +10,15 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 import java.util.stream.Stream;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Opcodes;
@@ -46,13 +51,14 @@ public final class AllocationChecker {
     /**
      * Analyses the given roots.
      *
-     * @param analysisRoots    directories (or jars) of {@code .class} files to analyse; annotated
-     *                         entry points are discovered by scanning these
+     * @param analysisRoots    directories or jar/zip archives of {@code .class} files to analyse;
+     *                         annotated entry points are discovered by scanning these
      * @param resolveClasspath additional classpath used only to resolve callees (unused for now)
      * @return the findings
      */
     public Report analyze(List<Path> analysisRoots, List<Path> resolveClasspath) {
         Map<String, ClassNode> index = buildIndex(analysisRoots);
+        ClassHierarchy hierarchy = new ClassHierarchy(index);
         List<Finding> findings = new ArrayList<>();
         for (ClassNode classNode : index.values()) {
             boolean typeLevel = hasAnnotation(classNode.visibleAnnotations, ZERO_ALLOCATIONS);
@@ -60,7 +66,7 @@ public final class AllocationChecker {
                 if (isWarmup(classNode, method)) {
                     analyzeWarmupMethod(classNode, method, index, findings);
                 } else if (typeLevel || hasAnnotation(method.visibleAnnotations, ZERO_ALLOCATIONS)) {
-                    walkEntry(classNode, method, index, findings);
+                    walkEntry(classNode, method, index, hierarchy, findings);
                 }
             }
         }
@@ -68,8 +74,13 @@ public final class AllocationChecker {
     }
 
     /** Walks a single annotated entry point and everything it calls transitively. */
-    private void walkEntry(ClassNode owner, MethodNode entry, Map<String, ClassNode> index, List<Finding> findings) {
-        walk(owner, entry, List.of(signature(owner, entry)), new HashSet<>(), index, findings);
+    private void walkEntry(
+            ClassNode owner,
+            MethodNode entry,
+            Map<String, ClassNode> index,
+            ClassHierarchy hierarchy,
+            List<Finding> findings) {
+        walk(owner, entry, List.of(signature(owner, entry)), new HashSet<>(), index, hierarchy, findings);
     }
 
     private void walk(
@@ -78,6 +89,7 @@ public final class AllocationChecker {
             List<String> callPath,
             Set<String> visited,
             Map<String, ClassNode> index,
+            ClassHierarchy hierarchy,
             List<Finding> findings) {
         if (!visited.add(key(owner, method))) {
             return;
@@ -98,21 +110,25 @@ public final class AllocationChecker {
             // Only a plain (non-allocating) call is a candidate for descent. Constructor calls
             // (<init>) are construction, already represented by the paired allocation opcode.
             if (category == null && insn instanceof MethodInsnNode call && !call.name.equals("<init>")) {
-                ClassNode calleeOwner = index.get(call.owner);
-                MethodNode callee = findMethod(calleeOwner, call.name, call.desc);
-                if (callee != null) {
-                    if (isWarmup(calleeOwner, callee)) {
-                        continue; // warmup boundary: its allocations are sanctioned, stop descending
-                    }
-                    List<String> nextPath = new ArrayList<>(callPath);
-                    nextPath.add(signature(calleeOwner, callee));
-                    walk(calleeOwner, callee, nextPath, visited, index, findings);
-                } else {
+                // A call site may reach more than one body: the declaration it names, plus every
+                // indexed override reachable by virtual dispatch. All of them are on the hot path.
+                List<ClassHierarchy.MethodRef> targets =
+                        hierarchy.resolve(call.getOpcode(), call.owner, call.name, call.desc);
+                if (targets.isEmpty()) {
                     List<String> unresolvedPath = new ArrayList<>(callPath);
                     unresolvedPath.add(targetSignature(call));
                     findings.add(new Finding(
                             Finding.Kind.UNANALYZABLE_CALL,
                             className, method.name, method.desc, line, null, unresolvedPath));
+                    continue;
+                }
+                for (ClassHierarchy.MethodRef target : targets) {
+                    if (isWarmup(target.owner(), target.method())) {
+                        continue; // warmup boundary: its allocations are sanctioned, stop descending
+                    }
+                    List<String> nextPath = new ArrayList<>(callPath);
+                    nextPath.add(signature(target.owner(), target.method()));
+                    walk(target.owner(), target.method(), nextPath, visited, index, hierarchy, findings);
                 }
             }
         }
@@ -238,18 +254,6 @@ public final class AllocationChecker {
         return false;
     }
 
-    private static MethodNode findMethod(ClassNode owner, String name, String descriptor) {
-        if (owner == null) {
-            return null;
-        }
-        for (MethodNode method : owner.methods) {
-            if (method.name.equals(name) && method.desc.equals(descriptor)) {
-                return method;
-            }
-        }
-        return null;
-    }
-
     private static String signature(ClassNode owner, MethodNode method) {
         return Type.getObjectType(owner.name).getClassName() + "#" + method.name + method.desc;
     }
@@ -277,26 +281,71 @@ public final class AllocationChecker {
     private Map<String, ClassNode> buildIndex(List<Path> roots) {
         Map<String, ClassNode> index = new HashMap<>();
         for (Path root : roots) {
-            try (Stream<Path> paths = Files.walk(root)) {
-                paths.filter(p -> p.toString().endsWith(".class")).forEach(p -> {
-                    ClassNode node = readClass(p);
-                    index.putIfAbsent(node.name, node);
-                });
-            } catch (IOException e) {
-                throw new UncheckedIOException("Failed to walk " + root, e);
+            if (isArchive(root)) {
+                indexArchive(root, index);
+            } else {
+                indexDirectory(root, index);
             }
         }
         return index;
     }
 
+    private static boolean isArchive(Path root) {
+        if (!Files.isRegularFile(root)) {
+            return false;
+        }
+        String name = root.getFileName().toString().toLowerCase(Locale.ROOT);
+        return name.endsWith(".jar") || name.endsWith(".zip");
+    }
+
+    private void indexDirectory(Path root, Map<String, ClassNode> index) {
+        try (Stream<Path> paths = Files.walk(root)) {
+            paths.filter(p -> p.toString().endsWith(".class")).forEach(p -> {
+                ClassNode node = readClass(p);
+                index.putIfAbsent(node.name, node);
+            });
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to walk " + root, e);
+        }
+    }
+
+    /**
+     * Indexes the classes inside a jar. Silently indexing nothing here would mean reporting a clean
+     * bill of health for code that was never read, so anything unreadable fails loudly instead.
+     */
+    private void indexArchive(Path archive, Map<String, ClassNode> index) {
+        try (JarFile jar = new JarFile(archive.toFile())) {
+            for (Enumeration<JarEntry> entries = jar.entries(); entries.hasMoreElements();) {
+                JarEntry entry = entries.nextElement();
+                if (entry.isDirectory() || !entry.getName().endsWith(".class")) {
+                    continue;
+                }
+                try (InputStream in = jar.getInputStream(entry)) {
+                    ClassNode node = readClass(in.readAllBytes(), archive + "!" + entry.getName());
+                    index.putIfAbsent(node.name, node);
+                }
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read " + archive, e);
+        }
+    }
+
     private ClassNode readClass(Path classFile) {
         try {
-            ClassReader reader = new ClassReader(Files.readAllBytes(classFile));
+            return readClass(Files.readAllBytes(classFile), classFile.toString());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read " + classFile, e);
+        }
+    }
+
+    private ClassNode readClass(byte[] classBytes, String description) {
+        try {
+            ClassReader reader = new ClassReader(classBytes);
             ClassNode node = new ClassNode();
             reader.accept(node, ClassReader.SKIP_FRAMES);
             return node;
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to read " + classFile, e);
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("Failed to parse " + description, e);
         }
     }
 }
