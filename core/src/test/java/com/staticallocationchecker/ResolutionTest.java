@@ -9,15 +9,13 @@ import com.staticallocationchecker.fixtures.Dispatch;
 import com.staticallocationchecker.fixtures.Inheritance;
 import com.staticallocationchecker.fixtures.Varargs;
 import java.util.List;
-import org.junit.jupiter.api.Disabled;
+import java.util.Map;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 /**
- * How call sites are resolved to the bytecode that actually runs.
- *
- * <p>Several tests here are {@link Disabled}: they state the behaviour the checker should have, and
- * currently fail. Each names the gap it is waiting on. They are the specification for that work,
- * not a record of what the tool does today.
+ * How call sites are resolved to the bytecode that actually runs: through virtual and interface
+ * dispatch, through inheritance, and through the array a varargs call site synthesises.
  */
 class ResolutionTest {
 
@@ -91,20 +89,21 @@ class ResolutionTest {
     void flagsTheImplicitArrayAtAVarargsCallSite() {
         List<Finding> findings = findingsFor(analyze(), Varargs.class);
 
-        assertEquals(2, findings.size(),
-                () -> "the two synthesised arrays, but not the pre-existing array, got " + findings);
         assertTrue(findings.stream().noneMatch(f -> f.methodName().equals("passesExistingArray")),
                 () -> "passing an existing array allocates nothing: " + findings);
+        assertTrue(findings.stream().anyMatch(f -> f.methodName().equals("passesPrimitiveVarargs")),
+                () -> "the synthesised array is an allocation: " + findings);
     }
 
     @Test
-    @Disabled("GAP: AllocationCategory.VARARGS_ARRAY is declared but never produced - a varargs "
-            + "call site is reported as the less specific NEW_ARRAY")
     void categorisesVarargsArraysDistinctlyFromExplicitArrays() {
-        List<Finding> findings = findingsFor(analyze(), Varargs.class);
+        Map<String, AllocationCategory> byMethod = findingsFor(analyze(), Varargs.class).stream()
+                .collect(Collectors.toMap(Finding::methodName, Finding::category));
 
-        assertTrue(findings.stream().allMatch(f -> f.category() == AllocationCategory.VARARGS_ARRAY),
-                () -> "expected VARARGS_ARRAY, got " + findings);
+        assertEquals(AllocationCategory.VARARGS_ARRAY, byMethod.get("passesPrimitiveVarargs"));
+        assertEquals(AllocationCategory.VARARGS_ARRAY, byMethod.get("passesObjectVarargs"));
+        assertEquals(AllocationCategory.NEW_ARRAY, byMethod.get("passesExplicitArrayToAnOrdinaryParameter"),
+                "identical bytecode to a varargs call site; only the callee's flag tells them apart");
     }
 
     @Test

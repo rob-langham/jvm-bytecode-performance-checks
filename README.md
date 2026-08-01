@@ -33,9 +33,11 @@ method and every method it calls transitively, reporting each allocation site:
 | `STRING_CONCAT` | `"a" + b` |
 | `LAMBDA` | a capturing lambda or method reference, which allocates per evaluation |
 
-The implicit array javac synthesises at a varargs call site is caught too, currently reported as
-`NEW_ARRAY`. (`AllocationCategory` declares a `VARARGS_ARRAY` constant that nothing yet produces —
-see Status.)
+| `VARARGS_ARRAY` | the array javac synthesises at a varargs call site |
+
+`f(1, 2, 3)` and `f(new int[] {1, 2, 3})` compile to identical bytecode, so the two are told apart
+by the callee's `ACC_VARARGS` flag. When the callee cannot be resolved the array is reported as the
+less specific `NEW_ARRAY` rather than guessed at.
 
 A contract declared on a supertype method - including on an interface - applies to overrides that
 do not repeat the annotation, since Java itself does not inherit annotations. An override that
@@ -180,7 +182,6 @@ Known gaps, each tracked as an issue and pinned by a `@Disabled` test that names
 
 | | Gap |
 | --- | --- |
-| [#6](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/6) | `VARARGS_ARRAY` is declared but never produced |
 | [#8](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/8) | Gradle task takes no configuration and passes silently with no classes directory |
 | [#9](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/9) | Maven mojo takes no parameters and fails with an internal exception |
 
