@@ -106,8 +106,18 @@ plugins {
 }
 ```
 
-Adds a `checkStaticAllocation` task in the `verification` group, which analyses
-`build/classes/java/main` and fails the build on any finding.
+Adds a `checkStaticAllocation` task in the `verification` group, wired into `check`. It analyses
+the main source set's output and fails the build on any finding. A configured directory that does
+not exist is an error, not an empty analysis.
+
+```kotlin
+tasks.checkStaticAllocation {
+    classesDirs.setFrom(sourceSets["main"].output.classesDirs)  // the default
+    resolveClasspath.setFrom(configurations.runtimeClasspath)   // fewer UNANALYZABLE_CALLs
+    ignoreFailures.set(true)                                    // warn only, while adopting
+    reportFile.set(layout.buildDirectory.file("reports/allocations.txt"))
+}
+```
 
 ### Maven
 
@@ -182,7 +192,6 @@ Known gaps, each tracked as an issue and pinned by a `@Disabled` test that names
 
 | | Gap |
 | --- | --- |
-| [#8](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/8) | Gradle task takes no configuration and passes silently with no classes directory |
 | [#9](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/9) | Maven mojo takes no parameters and fails with an internal exception |
 
 The `resolveClasspath` parameter on `analyze` is accepted but not yet used to widen callee
