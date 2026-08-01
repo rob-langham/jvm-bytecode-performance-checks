@@ -3,11 +3,11 @@ import java.io.ByteArrayOutputStream
 plugins {
     java
     application
-    id("com.staticallocationchecker.static-allocation-checker")
+    id("io.github.rob-langham.static-allocation-checker")
 }
 
 dependencies {
-    implementation("com.staticallocationchecker:core:${project.extra["checkerVersion"]}")
+    implementation("io.github.rob-langham:core:${project.extra["checkerVersion"]}")
 }
 
 java {
@@ -32,7 +32,7 @@ val agentJar = tasks.register<Exec>("buildAgentJar") {
 }
 
 fun agentJarFile() = rootDir.parentFile
-    .resolve("core/build/libs/core-0.1.0-SNAPSHOT-agent.jar")
+    .resolve("core/build/libs/core-0.1.0-agent.jar")
 
 tasks.named<JavaExec>("run") {
     dependsOn(agentJar)

@@ -43,8 +43,8 @@ That produces three things you might want:
 
 | Artifact | Path | What it is |
 | --- | --- | --- |
-| Library jar | `core/build/libs/core-0.1.0-SNAPSHOT.jar` | Annotations and the analyser API. A thin jar — ASM is a normal transitive dependency. |
-| Agent jar | `core/build/libs/core-0.1.0-SNAPSHOT-agent.jar` | The `-javaagent` flight recorder, with ASM shaded in. Self-contained. |
+| Library jar | `core/build/libs/core-0.1.0.jar` | Annotations and the analyser API. A thin jar — ASM is a normal transitive dependency. |
+| Agent jar | `core/build/libs/core-0.1.0-agent.jar` | The `-javaagent` flight recorder, with ASM shaded in. Self-contained. |
 | Plugins | `gradle-plugin/`, `maven-plugin/` | Build integrations. |
 
 ## Step 1: depend on the annotations
@@ -54,7 +54,7 @@ The annotations live in `com.staticallocationchecker.annotations` in the `core` 
 
 ```kotlin
 dependencies {
-    implementation("com.staticallocationchecker:core:0.1.0-SNAPSHOT")
+    implementation("io.github.rob-langham:core:0.1.0")
 }
 ```
 
@@ -90,7 +90,7 @@ you want on a first pass. See [annotation semantics](scenarios/annotation-semant
 
 ```kotlin
 plugins {
-    id("com.staticallocationchecker.static-allocation-checker")
+    id("io.github.rob-langham.static-allocation-checker")
 }
 ```
 
@@ -132,7 +132,7 @@ The task declares its inputs and outputs, so Gradle skips it when nothing has ch
 <plugin>
   <groupId>com.staticallocationchecker</groupId>
   <artifactId>maven-plugin</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>0.1.0</version>
   <executions>
     <execution>
       <goals><goal>check</goal></goals>
@@ -200,7 +200,7 @@ they actually stop happening, attach the agent:
 ```bash
 ./gradlew :core:shadowJar
 
-java -javaagent:core/build/libs/core-0.1.0-SNAPSHOT-agent.jar -jar your-app.jar
+java -javaagent:core/build/libs/core-0.1.0-agent.jar -jar your-app.jar
 ```
 
 The agent instruments `@AllocationsForWarmup` methods at class-load time and registers an MXBean

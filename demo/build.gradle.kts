@@ -1,10 +1,10 @@
 // Each scenario carries its own complete, readable build file - that is half of what these demos
 // are for. This root build only holds what is genuinely shared.
 plugins {
-    id("com.staticallocationchecker.static-allocation-checker") apply false
+    id("io.github.rob-langham.static-allocation-checker") apply false
 }
 
-val demoVersion = "0.1.0-SNAPSHOT"
+val demoVersion = "0.1.0"
 
 subprojects {
     repositories {

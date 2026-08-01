@@ -11,10 +11,9 @@ dependencies {
     implementation("org.ow2.asm:asm-analysis:$asmVersion")
 }
 
-java {
-    withJavadocJar()
-    withSourcesJar()
-}
+// The sources and javadoc jars Central requires are added by the publish plugin, so they are
+// deliberately not declared here - declaring both produces two artifacts with the same
+// classifier and the publication is rejected.
 
 // The agent can only really be tested by launching a JVM with -javaagent, which needs the built
 // jar. That is a different dependency shape from the unit tests, so it gets its own source set.
