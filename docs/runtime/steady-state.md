@@ -60,39 +60,32 @@ Attach it at startup:
 java -javaagent:core/build/libs/core-0.1.0-SNAPSHOT-agent.jar -jar your-app.jar
 ```
 
-At class-load time, `WarmupClassFileTransformer` rewrites every `@AllocationsForWarmup` method,
-inserting a probe before each allocation site the shared `Allocations` detector recognises. Here is
-`PricingEngine#levels` after instrumentation, disassembled from the transformed bytes:
+At class-load time, the agent rewrites every `@AllocationsForWarmup` method — and the synthetic
+methods behind any lambdas they create — inserting a counter immediately before each allocation. In
+`PricingEngine#levels`, the effect is as if the method had been written:
 
-```
-  long[] levels();
-    Code:
-       0: aload_0
-       1: getfield      #7                  // Field levels:[J
-       4: ifnonnull     20
-       7: aload_0
-       8: bipush        64
-      10: ldc           #32                 // String demo.PricingEngine#levels:26@9:NEW_ARRAY
-      12: invokestatic  #38                 // Method …/AllocationFlightRecorder.recordSite:(Ljava/lang/String;)V
-      15: newarray       long
-      17: putfield      #7                  // Field levels:[J
-      20: aload_0
-      21: getfield      #7                  // Field levels:[J
-      24: areturn
+```java
+@AllocationsForWarmup
+long[] levels() {
+    if (levels == null) {
+        record("demo.PricingEngine#levels:26@9:NEW_ARRAY");   // inserted by the agent
+        levels = new long[64];
+    }
+    return levels;
+}
 ```
 
-Two instructions inserted before the `newarray`: push a constant site key, call a static void
-method. Three things about that are deliberate:
+Your source is untouched; the rewriting happens to the compiled class as it is loaded. Two things
+about the site key are worth knowing:
 
-- **It is stack-neutral and balanced within its basic block**, so the existing stack-map frames stay
-  valid and only `maxStack` needs recomputing.
-- **The site key is `class#method:line@offset:category`.** The bytecode offset is in there because
-  class, method, line and category do not identify a site: two allocations of the same category can
-  share a source line, and with no debug information every site in a method shares line `-1`.
-  Collapsing those would make "one site fired twice" and "two sites fired once each"
-  indistinguishable — which is the exact distinction the recorder exists to draw.
-- **The offset comes from the *original* instruction list**, so it is not perturbed by the probes
-  being inserted and stays comparable to what the static checker sees.
+- **It identifies a site, not a line.** `class#method:line@offset:category` includes a position
+  within the method, because class, method, line and category together do not identify an
+  allocation: two allocations of the same kind can share a source line, and when a class is compiled
+  without debug information *every* site in a method reports the same line. Collapsing those would
+  make "one site fired twice" indistinguishable from "two sites fired once each" — the exact
+  distinction the recorder exists to draw.
+- **It is stable for a given compiled class**, so counts can be compared between runs and between
+  the recorder and the static checker.
 
 The agent also registers an MXBean at
 `com.staticallocationchecker:type=AllocationFlightRecorder`, exposing `TotalAllocations`, a

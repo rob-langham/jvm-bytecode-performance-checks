@@ -102,47 +102,10 @@ From `core/src/test/java/com/staticallocationchecker/fixtures/Varargs.java`:
 | `passesExistingArray` | `count(existing)` | — | *(no finding)* |
 
 Varargs arrays get their own category, distinct from an array you wrote yourself. The third row is
-what makes that distinction meaningful: `total(new int[] {1, 2, 3})` compiles to *identical*
-bytecode to a varargs call, and is still reported as an ordinary `NEW_ARRAY` — because `total`
-takes a real array parameter. Only the callee's `ACC_VARARGS` flag tells the two apart, and the
-checker reads it.
+what makes that distinction meaningful: `total(new int[] {1, 2, 3})` compiles to exactly the same
+thing a varargs call does, and is still reported as an ordinary `NEW_ARRAY` — because `total` takes
+a real array parameter. The checker tells them apart by looking at the method being called, not at
+the call site.
 
 So a `VARARGS_ARRAY` finding tells you something a `NEW_ARRAY` finding does not: **the array is not
 in your source.** Look at the method being called, not the line.
-
-## In the bytecode
-
-{: .note }
-> Optional.
-
-The call site builds the array element by element before making the call:
-
-```
-  public int passesPrimitiveVarargs();                stack after
-       0: iconst_3                                    [3]              the length
-       1: newarray int                                [arr]            <-- THE ALLOCATION
-       3: dup                                         [arr, arr]       keep a reference to
-                                                                       store into
-       4: iconst_0                                    [arr, arr, 0]    index
-       5: iconst_1                                    [arr, arr, 0, 1] value
-       6: iastore                                     [arr]            arr[0] = 1
-       7: dup                                         [arr, arr]
-       8: iconst_1 ; 9: iconst_2 ; 10: iastore        [arr]            arr[1] = 2
-      11: dup ; 12: iconst_2 ; 13: iconst_3 ; 14: iastore   [arr]      arr[2] = 3
-      15: invokestatic count:([I)I                    [result]         pops the array
-      18: ireturn                                     []
-```
-
-Note the callee's descriptor at instruction 15: `([I)I`. It took an array all along.
-
-The repeated `dup` is the same trick as in [`new`](direct-new.md#in-the-bytecode) — `iastore`
-consumes the array reference, so a fresh copy is needed before each store.
-
-And passing an existing array is just two instructions, with nothing allocated:
-
-```
-  public int passesExistingArray(int[] existing);     stack after      locals
-       0: aload_1                                     [existing]       0=this 1=existing
-       1: invokestatic count:([I)I                    [result]
-       4: ireturn                                     []
-```

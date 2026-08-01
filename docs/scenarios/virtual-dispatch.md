@@ -96,20 +96,3 @@ makes the intent explicit, which is worth more than the analysis benefit.
 
 **A finding on an implementation you have never heard of is still real.** Read the `callPath`: it
 names the annotated method whose contract was broken, and the route from it to the allocation.
-
-## In the bytecode
-
-{: .note }
-> Optional — and there is deliberately little to see, which is the point.
-
-```
-  public java.lang.Object throughInterface();                    stack after
-       0: aload_0                                                [this]
-       1: getfield handler:LDispatch$Handler;                    [handler]
-       4: invokeinterface Dispatch$Handler.handle:()Object;      [result]
-       9: areturn                                                []
-```
-
-Nothing here allocates. The call site names `Dispatch$Handler.handle` — an interface method with no
-code — and the JVM decides at runtime which body to run based on the object in `handler`. The
-checker has to make the same decision statically, and does it by walking every candidate.

@@ -8,10 +8,9 @@ has_children: true
 
 One page per thing that puts an object on the heap, and per rule that decides what happens next.
 
-Each page leads with **why** the allocation happens — in Java terms, not bytecode terms — then where
-it shows up in real code, then how to avoid it. The finding the checker produces comes near the end,
-and the bytecode after that, marked optional. You should never need to read a disassembly to
-understand what the tool is telling you.
+Each page leads with **why** the allocation happens, then where it shows up in real code, then how
+to avoid it. The finding the checker produces comes at the end. Nothing here asks you to read
+bytecode — if a page cannot explain an allocation in Java terms, that is a problem with the page.
 
 ## Allocations with a `new` you can see
 

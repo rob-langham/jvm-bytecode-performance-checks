@@ -112,35 +112,11 @@ public String concat(String a, int b) {
 | `line` | `10` |
 | `category` | `STRING_CONCAT` |
 
-One finding, not two. Note that `b` is an `int` being joined to a `String` and is **not** boxed —
-see below.
-
-## In the bytecode
-
-{: .note }
-> Optional.
-
-Since Java 9, `javac` compiles concatenation to a single `invokedynamic` that hands the pieces to
-the JVM, which assembles an optimised routine on first use:
-
-```
-  public String concat(String a, int b);                   stack after      locals
-       0: aload_1                                          [a]              0=this 1=a 2=b
-       1: iload_2                                          [a, 5]           ^ a raw int, not
-                                                                              an Integer
-       2: invokedynamic makeConcatWithConstants            [String]
-                        :(Ljava/lang/String;I)Ljava/lang/String;
-                        ^^ pops both pieces, pushes ONE new String
-       7: areturn                                          []
-```
-
-The descriptor `(Ljava/lang/String;I)` is worth reading: the `I` means the `int` is passed as a raw
-`int`. Indified concatenation does not box its primitives, so this line is one allocation, not two.
-
-The checker recognises it by the bootstrap method's owner being `StringConcatFactory`, rather than
-by the call site's name.
+One finding, not two — and worth knowing why. Since Java 9, concatenation is compiled to a single
+instruction that hands the pieces to the JVM to assemble, and it passes primitives through as
+primitives. So `b` is joined to the string **without being boxed**: one allocation here, not two.
 
 {: .note }
-> On Java 8 the same source compiled to `new StringBuilder()`, two `append` calls and a
-> `toString()` — which this checker would report as a [`NEW`](direct-new.md) plus a string of
-> unresolvable calls. The `invokedynamic` form is both faster and easier to recognise.
+> On Java 8 the same line compiled to `new StringBuilder()`, two `append` calls and a `toString()`
+> — which this checker would report as a [`NEW`](direct-new.md) plus a string of unresolvable calls.
+> If you are on a supported JDK you will see the single `STRING_CONCAT` finding above.

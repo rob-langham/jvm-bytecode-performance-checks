@@ -28,9 +28,9 @@ public long onTick(long instrumentId, int size) {
 }
 ```
 
-Three allocations, no `new`. Every one of them is plainly visible in the compiled bytecode —
-`invokestatic Long.valueOf`, an `invokedynamic` to `StringConcatFactory`, an `anewarray` for the
-varargs — so that is where this tool looks.
+Three allocations, and not a `new` in sight. None of them are visible in the source — but all three
+are unmistakable in the compiled class, because the compiler had to write out the boxing, the
+string building and the argument array explicitly. So that is where this tool looks.
 
 ## What it does
 

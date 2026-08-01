@@ -22,7 +22,8 @@ is usually too big for the fast path and too short-lived to be worth promoting.
 
 ## The three flavours
 
-All three report as `NEW_ARRAY`, and the distinction only matters when you are reading bytecode:
+All three report as `NEW_ARRAY`. The distinction rarely matters in practice — the checker treats
+them identically — but it is worth knowing they are three different things underneath:
 
 | Java | What it is |
 | --- | --- |
@@ -91,32 +92,3 @@ From `core/src/test/java/com/staticallocationchecker/fixtures/ArrayAllocations.j
 
 There is no exemption for arrays. Even an array of exceptions is reported — the
 [`Throwable` exemption](exceptions.md) covers throwing, and an array is not something you throw.
-
-## In the bytecode
-
-{: .note }
-> Optional.
-
-Three opcodes, one per flavour. Each takes its dimensions off the stack and pushes the new array —
-a single instruction, with no constructor call to follow it:
-
-```
-  new int[10]                                  stack after
-       0: bipush        10                     [10]        the length, pushed as a value
-       2: newarray      int                    [int[]]     pops the length, pushes the array
-       4: areturn                              []
-
-  new String[10]
-       0: bipush        10                     [10]
-       2: anewarray     java/lang/String       [String[]]  same, but elements are references
-       5: areturn                              []
-
-  new int[2][3]
-       0: iconst_2                             [2]         outer length
-       1: iconst_3                             [2, 3]      inner length
-       2: multianewarray "[[I", 2              [int[][]]   pops BOTH, allocates all three
-       6: areturn                                          objects, pushes the outer one
-```
-
-`multianewarray`'s operand `2` is the number of dimensions to take off the stack. One instruction,
-three objects on the heap, one finding — which is the point made [above](#the-three-flavours).

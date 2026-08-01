@@ -6,7 +6,7 @@ nav_order: 16
 
 # Regenerating these pages
 
-Every Java snippet, bytecode listing and finding on the scenario pages was taken from a real run
+Every Java snippet and every finding on the scenario pages was taken from a real run
 against the fixtures in `core/src/test/java/com/staticallocationchecker/fixtures/`. When the
 analyser's behaviour changes, this is how to check the pages still tell the truth.
 
@@ -55,51 +55,6 @@ own classes without wiring up a plugin:
 java -cp core/build/libs/core-0.1.0-SNAPSHOT-agent.jar \
      docs/tools/FindingsReport.java build/classes/java/main libs/shared-domain.jar
 ```
-
-## Regenerate the bytecode listings
-
-Plain `javap`. The listings on these pages use `-c` (disassemble), `-p` (include private members)
-and occasionally `-l` (line numbers, to show the `LineNumberTable` a finding's `line` comes from):
-
-```bash
-cd core/build/classes/java/test
-javap -c -p -l com/staticallocationchecker/fixtures/Autoboxing.class
-```
-
-Listings are trimmed for readability — long constant-pool comments are elided with `…`, and
-`LocalVariableTable` blocks are dropped unless the page is making a point about them. The
-instructions and offsets are never altered.
-
-## Regenerate the instrumented bytecode
-
-The [warmup-under-load page](../runtime/steady-state.md) shows a method after the agent has
-rewritten it. To reproduce that, run `WarmupInstrumenter` over a compiled class and disassemble the
-result:
-
-```java
-// Instrument.java
-import com.staticallocationchecker.instrument.WarmupInstrumenter;
-import java.nio.file.*;
-
-public class Instrument {
-    public static void main(String[] args) throws Exception {
-        byte[] instrumented = new WarmupInstrumenter(Instrument.class.getClassLoader())
-                .instrument(Files.readAllBytes(Path.of(args[0])));
-        Files.write(Path.of(args[1]), instrumented);
-    }
-}
-```
-
-```bash
-java -cp core/build/libs/core-0.1.0-SNAPSHOT-agent.jar Instrument.java \
-     examples/steady-state-demo/build/classes/demo/PricingEngine.class \
-     /tmp/instrumented/demo/PricingEngine.class
-
-javap -c -p -cp /tmp/instrumented demo.PricingEngine
-```
-
-Note that `instrument` returns `null` when the class has no warmup allocation sites — per the
-`ClassFileTransformer` contract, that means "unchanged".
 
 ## Regenerate the load-test output
 
