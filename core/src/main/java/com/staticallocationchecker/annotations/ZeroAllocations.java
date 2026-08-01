@@ -14,6 +14,6 @@ import java.lang.annotation.Target;
  * as are allocations reached through an {@link AllocationsForWarmup} boundary.
  */
 @Retention(RetentionPolicy.RUNTIME)
-@Target({ElementType.METHOD, ElementType.TYPE})
+@Target({ElementType.METHOD, ElementType.CONSTRUCTOR, ElementType.TYPE})
 public @interface ZeroAllocations {
 }
