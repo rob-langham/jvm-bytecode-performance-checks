@@ -18,7 +18,7 @@ A `Finding` has seven fields. Throughout these docs they are shown as a table:
 
 | Field | Example | Notes |
 | --- | --- | --- |
-| `kind` | `ZERO_ALLOCATION_VIOLATION` | One of four; see below |
+| `kind` | `ZERO_ALLOCATION_VIOLATION` | One of five; see below |
 | `className` | `com.example.PriceLevels` | Binary name of the class **containing the site** |
 | `methodName` | `lookup` | The method containing the site, not the annotated entry point |
 | `methodDescriptor` | `(J)Ljava/lang/Object;` | JVM descriptor, so overloads are distinguishable |
@@ -26,7 +26,7 @@ A `Finding` has seven fields. Throughout these docs they are shown as a table:
 | `category` | `NEW` | `null` for `UNANALYZABLE_CALL` |
 | `callPath` | `[…#onTick(J)V, …#lookup(J)…]` | Entry point → site |
 
-The four kinds:
+The five kinds:
 
 | Kind | Means |
 | --- | --- |
@@ -34,6 +34,10 @@ The four kinds:
 | `WARMUP_NOT_GUARDED` | A warmup allocation on every path through the method |
 | `WARMUP_NOT_CACHED` | A warmup allocation whose reference is not retained |
 | `UNANALYZABLE_CALL` | A call that resolved to nothing in the analysis roots, or a warmup method whose dataflow analysis failed |
+| `CONFLICTING_CONTRACTS` | One method claims both contracts at once — see [where annotations can go](scenarios/annotation-semantics.md#both-annotations-on-one-method) |
+
+The six allocation categories are `NEW`, `NEW_ARRAY`, `BOXING`, `STRING_CONCAT`, `VARARGS_ARRAY`
+and `LAMBDA`. `category` is `null` for the two kinds that are not about a specific allocation.
 
 **`className` is where the allocation is, not where the annotation is.** This trips people up. If
 `OrderBook#onTick` is annotated and the allocation is in `PriceLevels#lookup`, the finding names
@@ -86,15 +90,19 @@ for carving a legitimate initialisation island out of a hot path — and equally
 an allocation you did not want to deal with, so keep these methods small enough to read.
 
 The three outcomes, and the shapes that count as "cached", are in
-[the warmup contract](scenarios/warmup-contract.md) and [warmup caching](scenarios/warmup-caching.md).
+[the warmup contract](scenarios/warmup-contract.md) and [what counts as cached](scenarios/warmup-caching.md).
 
 ## Best practices
 
 ### Turn it on for one path, not one codebase
 
-The checker fails the build on *any* finding, with no severity levels and no baseline file. Turning
-it on across an existing codebase produces a wall of findings, most of them
+The checker fails the build on *any* finding, and there is no baseline file or per-site suppression.
+Turning it on across an existing codebase produces a wall of findings, most of them
 `UNANALYZABLE_CALL` from JDK calls. Pick the hot path you actually care about and annotate that.
+
+For the transition, both plugins can report without failing — `ignoreFailures` in Gradle,
+`-Dstatic-allocation-checker.ignoreFailures=true` in Maven — which lets you watch the count come
+down before you make it fatal.
 
 ### Prefer preallocated state to clever avoidance
 
@@ -144,18 +152,26 @@ in your load-test environment.
 This will be most of your findings at first. A call is unanalyzable when nothing it could reach is
 present in the analysis roots.
 
-**Give it more roots.** The library API takes several:
+**Give it more roots.** Both plugins take them, so a multi-module build no longer needs the library
+API:
 
-```java
-new AllocationChecker().analyze(
-        List.of(Path.of("build/classes/java/main"),
-                Path.of("build/classes/java/generated"),
-                Path.of("libs/shared-domain-1.4.jar")),
-        List.of());
+```kotlin
+// Gradle
+tasks.named<StaticAllocationCheckerTask>("checkStaticAllocation") {
+    classesDirs.from(project(":shared-domain").layout.buildDirectory.dir("classes/java/main"))
+}
 ```
 
-The build plugins each pass exactly one root and take no configuration, so anything beyond a single
-module needs the library API today.
+```xml
+<!-- Maven -->
+<configuration>
+  <additionalRoots>
+    <additionalRoot>${project.basedir}/../shared-domain/target/classes</additionalRoot>
+  </additionalRoots>
+</configuration>
+```
+
+Roots can be directories or `.jar`/`.zip` archives.
 
 **Do not point it at the JDK.** Calls into `java.*` will always be unanalyzable in practice. The
 realistic approach is to not have `java.*` calls on the annotated path — which, on a genuine
@@ -180,22 +196,14 @@ entry point. It does not mean:
 
 ## Known gaps
 
-Each is tracked as an issue and pinned by a `@Disabled` test that names it, so the test suite
-doubles as the work list.
+All eight gaps tracked after the first review round are now closed. What remains:
 
-| | Gap |
-| --- | --- |
-| [#2](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/2) | **Lambda bodies are not instrumented.** A lambda body compiles to a synthetic method carrying no annotation, so a warmup method doing its work inside a lambda records nothing at runtime. See [lambdas](scenarios/lambdas.md#the-gap-lambda-bodies-are-not-instrumented-at-runtime). |
-| [#4](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/4) | **An override silently drops the contract.** Annotations are not inherited, matching Java's own rule. See [annotation semantics](scenarios/annotation-semantics.md#an-override-does-not-inherit-the-contract). |
-| [#6](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/6) | **`VARARGS_ARRAY` is declared but never produced.** Varargs report as `NEW_ARRAY`. See [varargs](scenarios/varargs.md). |
-| [#7](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/7) | **Both annotations on one method: warmup silently wins.** No error, no warning. |
-| [#8](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/8) | **The Gradle task takes no configuration** — no skip flag, no extra roots — and passes silently when the classes directory is missing. |
-| [#9](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/9) | **The Maven mojo takes no parameters** and fails with an internal exception rather than a clean build error. |
-
-Also: **`resolveClasspath` is accepted but unused.** Widening callee resolution without also adding
-entry points is not possible yet.
-
-Two gaps that appeared in earlier versions of this page are now closed: annotating a constructor
-directly ([#5](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/5)) and
-retransforming already-loaded classes on dynamic attach
-([#3](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/3)).
+- **`resolveClasspath` is accepted but unused.** Both plugins take the parameter and pass it to the
+  analyser, which does not yet use it to widen callee resolution. Until it does, reducing
+  [unanalyzable calls](scenarios/unanalyzable-calls.md) means adding *analysis roots*, which also
+  makes any annotated methods inside them into entry points of their own.
+- **Nothing is published to an artifact repository.** See
+  [Setup](setup.md#consuming-the-project-today).
+- **There is no suppression mechanism.** No baseline file, no per-site ignore, no severity levels. A
+  finding you have decided to accept has to be fixed or the check turned off for the module —
+  `ignoreFailures` reports without failing, but reports everything.

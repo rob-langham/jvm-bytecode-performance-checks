@@ -6,154 +6,143 @@ nav_order: 6
 
 # Varargs
 
-Calling a varargs method allocates an array at the *call site*. The array is invisible in the
-source and belongs to the caller, not the callee.
+**Calling a `foo(int...)` method allocates an array, every time, at the call site.**
 
-## The Java
+Varargs is a compiler convenience with a runtime cost. There is no such thing as a variable-length
+argument list in the JVM — the method really takes an array, and somebody has to build it. That
+somebody is the caller.
 
-`core/src/test/java/com/staticallocationchecker/fixtures/Varargs.java`
+## Why the caller pays
 
 ```java
-public class Varargs {
+static int count(int... values) { ... }
 
-    static int count(int... values) {
-        return values.length;
-    }
-
-    static int countObjects(Object... values) {
-        return values.length;
-    }
-
-    @ZeroAllocations
-    public int passesPrimitiveVarargs() {
-        return count(1, 2, 3);
-    }
-
-    @ZeroAllocations
-    public int passesObjectVarargs(String a, String b) {
-        return countObjects(a, b);
-    }
-
-    /** Passing an existing array to a varargs parameter allocates nothing. */
-    @ZeroAllocations
-    public int passesExistingArray(int[] existing) {
-        return count(existing);
-    }
-}
+count(1, 2, 3);
 ```
 
-## The bytecode
+The method's real signature is `count(int[])`. So at every call site, the compiler writes the code
+you did not:
 
-```
-  public int passesPrimitiveVarargs();
-    Code:
-       0: iconst_3
-       1: newarray       int          // <-- the array you did not write
-       3: dup
-       4: iconst_0
-       5: iconst_1
-       6: iastore
-       7: dup
-       8: iconst_1
-       9: iconst_2
-      10: iastore
-      11: dup
-      12: iconst_2
-      13: iconst_3
-      14: iastore
-      15: invokestatic  #7            // Method count:([I)I
-      18: ireturn
+```java
+count(new int[] {1, 2, 3});   // what actually gets compiled
 ```
 
-`javac` emits: allocate an array of the right length, fill it element by element, pass it. The
-callee's signature was `([I)I` all along — varargs is purely a call-site convenience.
+The array is allocated by *your* method, on *your* hot path, and thrown away as soon as the call
+returns. Call it a million times and you allocate a million arrays.
 
-The `Object...` case is the same with `anewarray`:
+The allocation belongs to the caller, which has a useful consequence: **you cannot fix this by
+changing the callee.** Adding a fixed-arity overload is a fix; optimising the varargs method is not.
 
-```
-  public int passesObjectVarargs(java.lang.String, java.lang.String);
-    Code:
-       0: iconst_2
-       1: anewarray     #2                  // class java/lang/Object
-       4: dup
-       ...
-      12: invokestatic  #13                 // Method countObjects:([Ljava/lang/Object;)I
-```
+## Where it bites
 
-And passing an array through allocates nothing at all, because there is nothing to synthesise:
+Varargs is everywhere in APIs that look free:
 
-```
-  public int passesExistingArray(int[]);
-    Code:
-       0: aload_1
-       1: invokestatic  #7                  // Method count:([I)I
-       4: ireturn
-```
+| Call | Allocates |
+| --- | --- |
+| `log.info("a {} b {}", x, y)` | an `Object[]`, plus [boxing](autoboxing.md) if `x`/`y` are primitives |
+| `String.format("%d/%d", a, b)` | an `Object[]`, plus boxing, plus the result `String` |
+| `Objects.hash(a, b)` | an `Object[]` — **always**, even for two arguments |
+| `Arrays.asList(a, b)` | an `Object[]` |
+| `EnumSet.of(A, B, C, D, E, F)` | an `Object[]`, from six arguments up |
+| `List.of(a, b, c)` | **nothing** — see below |
 
-## What the checker reports
+Two are worth calling out:
 
-Two findings. `passesExistingArray` is clean.
+**`List.of` and `Set.of` have fixed-arity overloads** for up to ten elements. `List.of(a, b, c)`
+calls `of(E, E, E)` and allocates no array. Only at eleven arguments does it reach the varargs
+overload. (The list object itself is still an allocation.)
 
-| `methodName` | `line` | `category` |
-| --- | --- | --- |
-| `passesPrimitiveVarargs` | 18 | `NEW_ARRAY` |
-| `passesObjectVarargs` | 23 | `NEW_ARRAY` |
+**`Objects.hash(a, b)` always allocates.** Its signature is `hash(Object...)` with no fixed-arity
+overload, so the two-argument case builds an array. Writing the arithmetic out —
+`31 * Objects.hashCode(a) + Objects.hashCode(b)` — does not.
 
-{: .warning }
-> **`AllocationCategory` declares `VARARGS_ARRAY`, and nothing produces it.** A synthesised varargs
-> array is reported as `NEW_ARRAY`, indistinguishable from an array you wrote yourself. This is a
-> known gap with a `@Disabled` test naming it. Until it is closed, a `NEW_ARRAY` finding on a line
-> with no visible array construction almost certainly means varargs.
+## What does *not* allocate
 
-## Why
-
-The checker sees the instruction, not the intent. `newarray`/`anewarray` is `NEW_ARRAY`
-regardless of whether you or `javac` wrote it — which is precisely the value of checking bytecode
-instead of source. Distinguishing the two would mean recognising the synthesise-fill-call idiom, or
-reading the callee's `ACC_VARARGS` flag at the call site.
-
-## Where it hides
-
-Varargs is pervasive in APIs that look innocuous:
+Passing an array you already have. There is nothing to build:
 
 ```java
 @ZeroAllocations
-public void handle(long id, int size) {
-    log.info("received {} of {}", id, size);   // Object[] + two boxed longs/ints
-    String.format("%d/%d", id, size);          // Object[] + boxing + STRING_CONCAT machinery
-    List.of(a, b, c);                          // Object[] for 3+ elements
-    Arrays.asList(a, b);                       // Object[]
-    Objects.hash(a, b);                        // Object[]
-    EnumSet.of(A, B, C, D, E, F);              // Object[] for the 6+ overload
+public int passesExistingArray(int[] existing) {
+    return count(existing);      // clean: no array is synthesised
 }
 ```
 
-Two of those are worth calling out:
-
-- **`List.of` and `Set.of`** have overloads for zero to ten arguments that take individual
-  parameters, then a varargs overload. `List.of(a, b, c)` uses a fixed-arity overload and allocates
-  no array (though it does allocate the list itself). `List.of(a, b, …, k)` with eleven arguments
-  hits the varargs overload and allocates one.
-- **`Objects.hash(a, b)`** always allocates an array. `Objects.hashCode(a) * 31 + Objects.hashCode(b)`
-  does not.
+This is the escape hatch for a hot path that must call a varargs API: keep a preallocated array in
+a field, fill it in place, and pass it.
 
 ## Fixing it
 
-**Use a fixed-arity overload.** Most logging frameworks provide one- and two-argument forms
-precisely to avoid this; SLF4J's `info(String, Object, Object)` allocates no array (though it will
-[box](autoboxing.md) primitives).
+**Use a fixed-arity overload if one exists.** Most logging frameworks provide one- and
+two-argument forms for exactly this reason — SLF4J's `info(String, Object, Object)` allocates no
+array, though it will still box primitives.
 
-**Write the fixed-arity method yourself:**
+**Write one yourself** for your own hot APIs:
 
 ```java
 // Before
-static int count(int... values) { ... }
-count(1, 2, 3);
+static int count(int... values);
+count(1, 2, 3);                     // allocates
 
 // After
-static int count(int a, int b, int c) { ... }
-count(1, 2, 3);   // no array
+static int count(int a, int b, int c);
+count(1, 2, 3);                     // no array
 ```
 
-**Pass a preallocated array** held in a field, filled in place — the `passesExistingArray` shape
-above. The array itself becomes a [warmup allocation](warmup-contract.md).
+**Or pass a reused array**, as above.
+
+## What the checker reports
+
+From `core/src/test/java/com/staticallocationchecker/fixtures/Varargs.java`:
+
+| `methodName` | Source | `line` | `category` |
+| --- | --- | --- | --- |
+| `passesPrimitiveVarargs` | `count(1, 2, 3)` | 18 | **`VARARGS_ARRAY`** |
+| `passesObjectVarargs` | `countObjects(a, b)` | 23 | **`VARARGS_ARRAY`** |
+| `passesExplicitArrayToAnOrdinaryParameter` | `total(new int[] {1, 2, 3})` | 43 | `NEW_ARRAY` |
+| `passesExistingArray` | `count(existing)` | — | *(no finding)* |
+
+Varargs arrays get their own category, distinct from an array you wrote yourself. The third row is
+what makes that distinction meaningful: `total(new int[] {1, 2, 3})` compiles to *identical*
+bytecode to a varargs call, and is still reported as an ordinary `NEW_ARRAY` — because `total`
+takes a real array parameter. Only the callee's `ACC_VARARGS` flag tells the two apart, and the
+checker reads it.
+
+So a `VARARGS_ARRAY` finding tells you something a `NEW_ARRAY` finding does not: **the array is not
+in your source.** Look at the method being called, not the line.
+
+## In the bytecode
+
+{: .note }
+> Optional.
+
+The call site builds the array element by element before making the call:
+
+```
+  public int passesPrimitiveVarargs();                stack after
+       0: iconst_3                                    [3]              the length
+       1: newarray int                                [arr]            <-- THE ALLOCATION
+       3: dup                                         [arr, arr]       keep a reference to
+                                                                       store into
+       4: iconst_0                                    [arr, arr, 0]    index
+       5: iconst_1                                    [arr, arr, 0, 1] value
+       6: iastore                                     [arr]            arr[0] = 1
+       7: dup                                         [arr, arr]
+       8: iconst_1 ; 9: iconst_2 ; 10: iastore        [arr]            arr[1] = 2
+      11: dup ; 12: iconst_2 ; 13: iconst_3 ; 14: iastore   [arr]      arr[2] = 3
+      15: invokestatic count:([I)I                    [result]         pops the array
+      18: ireturn                                     []
+```
+
+Note the callee's descriptor at instruction 15: `([I)I`. It took an array all along.
+
+The repeated `dup` is the same trick as in [`new`](direct-new.md#in-the-bytecode) — `iastore`
+consumes the array reference, so a fresh copy is needed before each store.
+
+And passing an existing array is just two instructions, with nothing allocated:
+
+```
+  public int passesExistingArray(int[] existing);     stack after      locals
+       0: aload_1                                     [existing]       0=this 1=existing
+       1: invokestatic count:([I)I                    [result]
+       4: ireturn                                     []
+```

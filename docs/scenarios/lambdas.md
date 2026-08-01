@@ -6,143 +6,195 @@ nav_order: 5
 
 # Lambdas
 
-A lambda may or may not allocate, and the difference is visible in one place: whether the
-`invokedynamic` has arguments.
+**A lambda allocates if it captures something. If it captures nothing, it is free.**
 
-## The Java
+That one sentence is the whole rule. The rest of this page is why it is true, and how to tell which
+kind you are looking at — which is harder than it sounds, because the two look almost identical in
+source.
 
-`core/src/test/java/com/staticallocationchecker/fixtures/Lambdas.java`
+## Why capturing costs an allocation
+
+A lambda has to become an object, because the thing receiving it expects an object — a `Runnable`,
+a `Comparator`, whatever the interface is.
+
+If the lambda captures nothing, every evaluation of it would produce an identical, stateless
+object. So the JVM makes **one** the first time the line runs, and hands you the same one forever
+after. Nothing is allocated on subsequent calls.
+
+If the lambda captures a variable, the object has to *hold* that variable — it is not stateless any
+more. Two evaluations that capture different values need two different objects. So the JVM has no
+choice but to build a fresh one **every time the lambda is evaluated**.
 
 ```java
-public class Lambdas {
+// Captures nothing. One object exists for the life of the program.
+Runnable a = () -> System.out.println("tick");
 
-    private static final Runnable NOOP = () -> {
-    };
+// Captures `count`. A new object every time this line runs.
+Runnable b = () -> System.out.println("tick " + count);
+```
 
-    @ZeroAllocations
-    public Runnable stateless() {
-        // Captures nothing: the JVM links this to a cached singleton, no per-call allocation.
-        return () -> NOOP.run();
-    }
+The cost is not in *running* the lambda. It is in *creating* it — so a capturing lambda in a method
+called a million times a second allocates a million objects a second, even if the lambda body
+itself does nothing.
 
-    @ZeroAllocations
-    public Runnable capturing(StringBuilder sink) {
-        // Captures sink: a new instance is allocated on every evaluation.
-        return () -> sink.append('x');
-    }
+## What counts as capturing
+
+This is where it gets slippery. Capturing is not about how much code is in the lambda; it is about
+whether the body mentions anything from outside itself.
+
+| The lambda | Captures | Allocates |
+| --- | --- | --- |
+| `() -> doStatic()` | nothing | **No** |
+| `() -> CONSTANT.run()` | nothing — a static field is not captured | **No** |
+| `String::isEmpty` | nothing | **No** |
+| `x -> x * 2` | nothing — `x` is a parameter, not a capture | **No** |
+| `() -> localVar.run()` | `localVar` | **Yes** |
+| `() -> this.count++` | `this` | **Yes** |
+| `() -> count++` (a field) | `this`, implicitly | **Yes** |
+| `someString::isEmpty` | `someString` | **Yes** |
+
+Three of these catch people out:
+
+**A parameter is not a capture.** `x -> x * 2` looks like it has state, and does not. The value
+arrives as an argument each time the lambda runs, so the lambda itself holds nothing.
+
+**Touching a field captures `this`.** Even though you never wrote `this`:
+
+```java
+private int count;
+
+@ZeroAllocations
+public Runnable tick() {
+    return () -> count++;    // captures this. Allocates.
 }
 ```
 
-## The bytecode
+The lambda needs the instance in order to reach `count`, so the instance is captured. This is the
+most common accidental capture in real code, because nothing in the syntax hints at it.
 
-```
-  public java.lang.Runnable stateless();
-    Code:
-       0: invokedynamic #7,  0              // InvokeDynamic #0:run:()Ljava/lang/Runnable;
-       5: areturn
+**Method references split two ways.** These differ by one word and are opposites:
 
-  public java.lang.Runnable capturing(java.lang.StringBuilder);
-    Code:
-       0: aload_1
-       1: invokedynamic #11,  0             // InvokeDynamic #1:run:(Ljava/lang/StringBuilder;)Ljava/lang/Runnable;
-       6: areturn
+```java
+String::isEmpty      // unbound: the string arrives as an argument. Free.
+someString::isEmpty  // bound: someString is captured. Allocates.
 ```
 
-The whole difference is in the indy descriptor:
+## Where it bites in real code
 
-| Method | Descriptor | Meaning |
-| --- | --- | --- |
-| `stateless` | `()Ljava/lang/Runnable;` | **No** captured values |
-| `capturing` | `(Ljava/lang/StringBuilder;)Ljava/lang/Runnable;` | One captured value: `sink` |
+The pattern that turns one allocation into millions:
 
-The argument types of an `invokedynamic` bootstrapped by `LambdaMetafactory` **are** the captured
-values. A non-capturing lambda has nothing to hold, so `LambdaMetafactory` links the call site to a
-single instance created once at link time and returns it forever. A capturing lambda must hold its
-captures, so it constructs an instance per evaluation.
-
-The bodies themselves compile to synthetic static methods:
-
+```java
+@ZeroAllocations
+public void onBatch(List<Order> orders) {
+    orders.forEach(order -> route(order, session));   // captures this and session
+}
 ```
-  private static void lambda$capturing$2(java.lang.StringBuilder);
-  private static void lambda$stateless$1();
+
+That lambda is created once per call to `onBatch`, not once per order — but if `onBatch` runs per
+message, that is one allocation per message. The loop body is not the problem; the lambda handed to
+`forEach` is.
+
+Also worth watching:
+
+- **`Optional.orElseGet(() -> fallback(key))`** — captures `key`, allocates on the hot path even
+  when the `Optional` is present.
+- **`computeIfAbsent(key, k -> new Level(k, config))`** — captures `config`, so the lambda is
+  allocated even on a cache *hit*, when the mapping function is never called. Drop the `config` and
+  it captures nothing and costs nothing — the difference really is that fine.
+- **A comparator built inline**, rather than held in a field.
+
+## Fixing it
+
+**Hoist it into a field**, so the allocation happens once at construction:
+
+```java
+private final Runnable task = () -> count++;   // allocated once
+
+@ZeroAllocations
+public Runnable tick() {
+    return task;
+}
+```
+
+**Or restructure so nothing is captured** — pass the state in as a parameter instead of closing
+over it:
+
+```java
+// Captures nothing: the order arrives as an argument.
+private static final BiConsumer<Session, Order> ROUTE = (session, order) -> route(order, session);
+```
+
+**Or do not use a lambda.** On a genuinely hot path, a plain loop allocates nothing and needs no
+analysis to prove it:
+
+```java
+for (int i = 0; i < orders.size(); i++) {
+    route(orders.get(i), session);
+}
 ```
 
 ## What the checker reports
 
-**One** finding. `stateless()` is clean.
+The fixture, `core/src/test/java/com/staticallocationchecker/fixtures/Lambdas.java`:
+
+```java
+@ZeroAllocations
+public Runnable stateless() {
+    return () -> NOOP.run();          // NOOP is a static field: captures nothing
+}
+
+@ZeroAllocations
+public Runnable capturing(StringBuilder sink) {
+    return () -> sink.append('x');    // captures sink
+}
+```
+
+**One finding.** `stateless()` is reported as clean:
 
 | Field | Value |
 | --- | --- |
 | `kind` | `ZERO_ALLOCATION_VIOLATION` |
 | `className` | `com.staticallocationchecker.fixtures.Lambdas` |
-| `methodName` / `methodDescriptor` | `capturing` `(Ljava/lang/StringBuilder;)Ljava/lang/Runnable;` |
+| `methodName` | `capturing` |
 | `line` | `20` |
 | `category` | `LAMBDA` |
 
-## Why
+This is one of the few places the checker can prove a *lack* of allocation rather than assuming the
+worst. Everywhere else it is deliberately conservative; here the JVM's specification guarantees a
+non-capturing lambda need not produce a fresh instance, so a clean verdict is a real one.
 
-```java
-if (LAMBDA_METAFACTORY.equals(bootstrapOwner)) {
-    // The indy descriptor's argument types are the captured values. A non-capturing
-    // lambda (no arguments) links to a cached singleton and does not allocate.
-    boolean capturing = Type.getArgumentTypes(indy.desc).length > 0;
-    return capturing ? AllocationCategory.LAMBDA : null;
-}
+## In the bytecode
+
+{: .note }
+> Only if you want it. Nothing above depends on reading this section.
+
+Both lambdas compile to a single `invokedynamic`, which produces the object. The difference is
+what that instruction takes off the stack first — and the stack column makes it obvious:
+
+```
+  public Runnable stateless();                             stack after   locals
+       0: invokedynamic run:()Runnable                     [Runnable]    0=this
+                        ^^ takes NOTHING off the stack. There is no state to
+                           put in the object, so the JVM returns a shared one.
+       5: areturn                                          []
+
+  public Runnable capturing(StringBuilder sink);           stack after   locals
+       0: aload_1                                          [sink]        0=this 1=sink
+                        ^^ the captured value is pushed first...
+       1: invokedynamic run:(StringBuilder)Runnable        [Runnable]    0=this 1=sink
+                        ^^ ...and consumed here. A fresh object is built to
+                           hold it, every time this line runs.
+       6: areturn                                          []
 ```
 
-This is one of the few places where the checker can prove *absence* of allocation rather than
-conservatively assuming it — the JLS and `LambdaMetafactory`'s specification both guarantee that a
-non-capturing lambda need not produce a fresh instance, and HotSpot's implementation caches.
-
-## What counts as capturing
-
-| Expression | Captures | Allocates |
-| --- | --- | --- |
-| `() -> doSomething()` (static call) | nothing | No |
-| `() -> CONSTANT.run()` (static field read) | nothing | No |
-| `String::isEmpty` (unbound method reference) | nothing | No |
-| `() -> this.field++` | `this` | **Yes** |
-| `x -> x + local` | `local` | **Yes** |
-| `someString::isEmpty` (bound method reference) | the receiver | **Yes** |
-
-An **instance** method reference like `someString::isEmpty` captures its receiver and therefore
-allocates. The unbound form `String::isEmpty` does not. They look almost identical in source.
-
-Note that a lambda inside an instance method that touches any instance state captures `this`, which
-is easy to do by accident:
+The argument types of the `invokedynamic` **are** the captured values. That is exactly the test the
+checker applies:
 
 ```java
-@ZeroAllocations
-public void process() {
-    items.forEach(item -> handler.handle(item));   // captures this (for handler) — allocates
-}
+boolean capturing = Type.getArgumentTypes(indy.desc).length > 0;
+return capturing ? AllocationCategory.LAMBDA : null;
 ```
 
-## The gap: lambda bodies are not instrumented at runtime
-
-A lambda body compiles to a synthetic method (`lambda$capturing$2` above) which carries **no
-annotation** — annotations are not propagated to the desugared method. The static checker still
-walks it if it is reachable through a normal call, but the [runtime agent](../runtime/steady-state.md)
-only instruments methods carrying `@AllocationsForWarmup`, so a warmup method that does its work
-inside a lambda records nothing. This is a known gap with a `@Disabled` test naming it.
-
-## Fixing it
-
-**Hoist the lambda into a field**, so it is allocated once:
-
-```java
-private final Runnable task = () -> sink.append('x');   // allocated in the constructor
-
-@ZeroAllocations
-public Runnable capturing() {
-    return task;
-}
-```
-
-**Or restructure so nothing is captured** — pass the state as a parameter of the functional
-interface rather than closing over it:
-
-```java
-// Captures nothing; the sink arrives as an argument.
-private static final Consumer<StringBuilder> APPEND = sink -> sink.append('x');
-```
+The lambda body itself compiles to a separate synthetic method — `lambda$capturing$2` — which is
+where the code you wrote actually lives. That method is not the allocation; the `invokedynamic`
+that produces the object is.

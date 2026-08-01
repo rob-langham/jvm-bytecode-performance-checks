@@ -1,27 +1,25 @@
 ---
-title: Warmup caching shapes
+title: What counts as cached
 parent: Allocation Scenarios
 nav_order: 14
 ---
 
-# Warmup caching shapes
+# What counts as cached
 
-"Cached into a field" is the plain statement of the rule. Real warmup code retains objects in more
-ways than a direct `putfield`, and the checker recognises four shapes of retention and any control
-structure that can skip the allocation.
+**"Kept" means more than "assigned to a field".** Real warmup code fills pools and registers things
+in collections, and all of that counts.
 
-Every method on this page is from
-`core/src/test/java/com/staticallocationchecker/fixtures/WarmupCaching.java`, and **every one of
-them is compliant** — the whole file produces no findings. It exists to pin down what the analysis
-accepts.
+This page is the reference for what the [warmup contract](warmup-contract.md) accepts. Every
+example on it is **compliant** — the whole fixture produces no findings. It exists to show you where
+the edges are.
 
-## Retention shapes
+## The four ways to keep something
 
-### Direct field store
+### Into a field
+
+The obvious one. Instance or static, both fine:
 
 ```java
-private static Object staticCache;
-
 @AllocationsForWarmup
 public Object staticField() {
     if (staticCache == null) {
@@ -31,47 +29,24 @@ public Object staticField() {
 }
 ```
 
-`PUTSTATIC` and `PUTFIELD` are both accepted:
-
-```java
-if (opcode == Opcodes.PUTFIELD || opcode == Opcodes.PUTSTATIC) {
-    retained.addAll(frame.getStack(frame.getStackSize() - 1).insns);
-    return;
-}
-```
-
-The top of stack at the store is the value being stored; every instruction that could have produced
-it is marked retained.
-
-### Through a local variable
+### Via a local variable
 
 ```java
 @AllocationsForWarmup
 public Object throughLocal() {
     if (instanceCache == null) {
-        Object created = new Object();
-        instanceCache = created;
+        Object created = new Object();   // into a local...
+        instanceCache = created;         // ...then into the field
     }
     return instanceCache;
 }
 ```
 
-```
-       4: ifnonnull     20
-       7: new           #2                  // class java/lang/Object
-      10: dup
-      11: invokespecial #1                  // Method java/lang/Object."<init>":()V
-      14: astore_1                   <-- into a local
-      15: aload_0
-      16: aload_1                    <-- back out of the local
-      17: putfield      #27                 // Field instanceCache:Ljava/lang/Object;
-```
+Accepted. The analysis follows the object through the local variable, so it still knows the thing
+being stored is the thing that was allocated. This matters more than it sounds: writing it in two
+steps is extremely common, and rejecting it would make the annotation useless.
 
-The value reaching `putfield` was produced by `aload_1`, not by `new`. This is precisely what the
-`copyOperation` override in [the warmup contract](warmup-contract.md#how-caching-is-decided) exists
-for: the `SourceValue` is passed through copies unchanged, so it still names the `NEW` at offset 7.
-
-### Into a field-held collection or map
+### Into a collection or map held in a field
 
 ```java
 private final List<Object> list = new ArrayList<>();
@@ -80,57 +55,35 @@ private final Map<String, Object> map = new HashMap<>();
 @AllocationsForWarmup
 public void intoCollection(boolean init) {
     if (init) {
-        list.add(new Object());
+        list.add(new Object());          // accepted
     }
 }
 
 @AllocationsForWarmup
 public void intoMap(boolean init) {
     if (init) {
-        map.put("k", new Object());
+        map.put("k", new Object());      // accepted — both arguments count
     }
 }
 ```
 
-```
-       1: ifeq          21
-       4: aload_0
-       5: getfield      #10                 // Field list:Ljava/util/List;   <-- receiver is a field read
-       8: new           #2                  // class java/lang/Object
-      11: dup
-      12: invokespecial #1
-      15: invokeinterface #30,  2           // InterfaceMethod java/util/List.add:(Ljava/lang/Object;)Z
-```
+There is no field assignment here at all. The object counts as kept because it was handed to
+something *already reachable from a field*. Registries, pools and caches are built this way, and
+they are a primary reason the annotation exists.
 
-There is no `putfield` here at all. The object is retained because it was handed to something
-already reachable from a field:
+**The receiver is what decides.** `list` is read from a field, so `list.add(x)` keeps `x`. If the
+receiver were a local or a freshly-created object, it would not:
 
 ```java
-if ((opcode == Opcodes.INVOKEVIRTUAL || opcode == Opcodes.INVOKEINTERFACE)
-        && insn instanceof MethodInsnNode call) {
-    int argumentCount = Type.getArgumentTypes(call.desc).length;
-    int receiverIndex = frame.getStackSize() - argumentCount - 1;
-    if (receiverIndex < 0 || !isReadFromAField(frame.getStack(receiverIndex))) {
-        return;
-    }
-    for (int argument = 0; argument < argumentCount; argument++) {
-        retained.addAll(frame.getStack(frame.getStackSize() - 1 - argument).insns);
-    }
-}
+new ArrayList<>().add(new Object());   // NOT kept — the list is thrown away
+localList.add(new Object());           // NOT kept — the list may be too
 ```
-
-**The receiver being a field read is what carries the weight.** `isReadFromAField` requires that
-*every* instruction that could have produced the receiver is a `GETFIELD` or `GETSTATIC`. That is
-what distinguishes `list.add(x)` — where `list` is durable state — from `new ArrayList<>().add(x)`
-or `temporary.add(x)`, where the object is dropped as soon as the method returns.
-
-All arguments of such a call are treated as retained, not just the last. `map.put("k", value)`
-retains both.
 
 {: .note }
 > This is a heuristic, and knowingly so. `logger.debug(new Object())` on a field-held logger would
-> count as retention. The alternative — requiring a literal field store — rejects the pooling and
-> registry patterns that real warmup code is full of, so the analysis errs towards accepting.
+> be accepted as "kept" even though the logger keeps nothing. The stricter alternative — demanding a
+> literal field store — rejects the pooling patterns this feature exists to serve, so the analysis
+> errs towards accepting.
 
 ### Into an array element
 
@@ -140,30 +93,22 @@ private Object[] pool;
 @AllocationsForWarmup
 public void intoArrayElements(int n) {
     if (pool == null) {
-        pool = new Object[n];
+        pool = new Object[n];                // allocation 1
         for (int i = 0; i < n; i++) {
-            pool[i] = new Object();
+            pool[i] = new Object();          // allocation 2 — kept, via the array
         }
     }
 }
 ```
 
-```java
-if (opcode == Opcodes.AASTORE) {
-    retained.addAll(frame.getStack(frame.getStackSize() - 1).insns);
-    return;
-}
-```
+Two allocations in one method, each judged separately, both compliant. Storing into the array keeps
+the element; the array itself is kept because it is assigned to `pool`. Note the array is **not**
+exempted just because things are stored into it — it has to justify itself on its own terms, and
+here it does.
 
-Note what this does *not* do: it does not require the array itself to be cached. As the source
-comment puts it, the array "must still justify itself separately — it is an allocation too, and gets
-its own verdict". Here it does: `pool = new Object[n]` is guarded by `if (pool == null)` and stored
-with `putfield`. Two allocations in one method, each independently compliant.
+## What counts as guarded
 
-## Guard shapes
-
-Guardedness is a reachability property, not a syntactic one, so anything that produces a
-control-flow edge around the allocation qualifies.
+Guardedness is "some path through the method skips this allocation", so it is not limited to `if`:
 
 ### A loop
 
@@ -176,24 +121,13 @@ public void guardedByLoop(int n) {
 }
 ```
 
-```
-       2: iload_2
-       3: iload_1
-       4: if_icmpge     24         <-- with n <= 0, jumps straight to return
-       7: aload_0
-       8: new           #2
-      ...
-      15: putfield      #27                 // Field instanceCache:Ljava/lang/Object;
-      18: iinc          2, 1
-      21: goto          2
-      24: return
-```
+Accepted, because `n <= 0` skips the body entirely.
 
-Compliant, because `n <= 0` reaches `return` at offset 24 without touching offset 8. Worth being
-clear-eyed about: this method allocates `n` times per call, and the checker passes it. The contract
-is "some path skips the allocation", which a loop trivially satisfies. If your warmup method has a
-loop in it, the static result is weak evidence and the [runtime
-recorder](../runtime/steady-state.md) is the thing to trust.
+{: .warning }
+> Be honest about this one. It allocates `n` times per call, and the checker passes it. "Some path
+> skips it" is a weak guarantee when the path that does not skip it runs a thousand times. **If a
+> warmup method contains a loop, the static result is weak evidence** — verify it with the
+> [runtime recorder](../runtime/steady-state.md).
 
 ### A ternary
 
@@ -205,8 +139,7 @@ public Object guardedByTernary() {
 }
 ```
 
-A ternary compiles to the same conditional jump an `if` does, so it reads identically to the
-analysis.
+Accepted — a ternary compiles to the same conditional jump an `if` does.
 
 ### Inside a try block
 
@@ -224,8 +157,7 @@ public Object insideTryBlock() {
 }
 ```
 
-Exception handlers add edges to the graph, and `newControlFlowEdge` records the ones ASM's analyser
-follows. The allocation stays guarded by the outer `if`.
+Accepted. Exception handlers create additional paths, and the analysis accounts for them.
 
 ### Several allocations in one method
 
@@ -241,28 +173,27 @@ public void twoCompliantAllocations() {
 }
 ```
 
-Each allocation is judged on its own — `exitReachableAvoiding` is called per site, avoiding only
-that site. Two compliant allocations, no findings. One compliant and one not gives exactly one
-finding.
+Each allocation is judged on its own. Two compliant ones give no findings; one compliant and one not
+gives exactly one finding, pointing at the one that failed.
 
-## Summary
+## The whole thing on one page
 
-| Shape | Retained? | Why |
-| --- | --- | --- |
-| `field = new X()` | Yes | `PUTFIELD` / `PUTSTATIC` |
-| `X x = new X(); field = x;` | Yes | copy-preserving interpreter |
-| `fieldList.add(new X())` | Yes | receiver is a field read |
-| `fieldMap.put(k, new X())` | Yes | all arguments retained |
-| `fieldArray[i] = new X()` | Yes | `AASTORE` |
-| `return new X()` | **No** | `WARMUP_NOT_CACHED` |
-| `new ArrayList<>().add(new X())` | **No** | receiver is not a field read |
-| `localList.add(new X())` | **No** | receiver is not a field read |
+| You wrote | Kept? |
+| --- | --- |
+| `field = new X()` | Yes |
+| `X x = new X(); field = x;` | Yes |
+| `fieldList.add(new X())` | Yes |
+| `fieldMap.put(k, new X())` | Yes |
+| `fieldArray[i] = new X()` | Yes |
+| `return new X()` | **No** — `WARMUP_NOT_CACHED` |
+| `localList.add(new X())` | **No** — receiver is not a field |
+| `new ArrayList<>().add(new X())` | **No** — receiver is thrown away |
 
-| Guard | Guarded? |
+| You wrote | Guarded? |
 | --- | --- |
 | `if (field == null)` | Yes |
-| `for (…)` / `while (…)` | Yes — the zero-iteration path skips it |
-| ternary | Yes |
-| `switch` with a default that skips | Yes |
-| nothing | **No** — `WARMUP_NOT_GUARDED` |
-| allocation at instruction 0 | **No** — `exitReachableAvoiding` returns `false` for `avoid == 0` |
+| `for` / `while` | Yes — the zero-iteration path skips it |
+| a ternary | Yes |
+| `switch` with a path that skips | Yes |
+| nothing — straight-line code | **No** — `WARMUP_NOT_GUARDED` |
+| an allocation as the method's very first instruction | **No** — nothing can precede it |

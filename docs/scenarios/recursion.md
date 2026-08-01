@@ -6,108 +6,75 @@ nav_order: 10
 
 # Recursion
 
-A transitive walk over a call graph with cycles has to terminate, and it has to report each site
-once rather than once per way of reaching it.
+**A method that calls itself is reported once, not once per level — and the analysis terminates.**
 
-## The Java
+This page is not about a kind of allocation. It is about what the checker does when the call graph
+has a cycle in it, which is worth knowing so the output does not surprise you.
 
-`core/src/test/java/com/staticallocationchecker/fixtures/RecursiveAllocation.java`
+## The shape
 
 ```java
-public class RecursiveAllocation {
+@ZeroAllocations
+public Object entry() {
+    return recurse(3);
+}
 
-    @ZeroAllocations
-    public Object entry() {
-        return recurse(3);
+private Object recurse(int n) {
+    if (n <= 0) {
+        return new Object();
     }
-
-    private Object recurse(int n) {
-        if (n <= 0) {
-            return new Object();
-        }
-        return recurse(n - 1);
-    }
+    return recurse(n - 1);
 }
 ```
 
-## The bytecode
+At runtime this allocates once, after four calls. A naive walker following every call would descend
+into `recurse` forever, since it cannot know `n` reaches zero.
 
-```
-  public java.lang.Object entry();
-    Code:
-       0: aload_0
-       1: iconst_3
-       2: invokevirtual #7                  // Method recurse:(I)Ljava/lang/Object;
-       5: areturn
+## What you get
 
-  private java.lang.Object recurse(int);
-    Code:
-       0: iload_1
-       1: ifgt          12
-       4: new           #2                  // class java/lang/Object
-       7: dup
-       8: invokespecial #1                  // Method java/lang/Object."<init>":()V
-      11: areturn
-      12: aload_0
-      13: iload_1
-      14: iconst_1
-      15: isub
-      16: invokevirtual #7                  // Method recurse:(I)Ljava/lang/Object;   <-- back edge
-      19: areturn
-```
-
-The instruction at offset 16 calls back into the method the walker is currently inside.
-
-## What the checker reports
-
-Exactly one finding:
+One finding:
 
 | Field | Value |
 | --- | --- |
-| `kind` | `ZERO_ALLOCATION_VIOLATION` |
 | `className` | `com.staticallocationchecker.fixtures.RecursiveAllocation` |
-| `methodName` / `methodDescriptor` | `recurse` `(I)Ljava/lang/Object;` |
+| `methodName` | `recurse` |
 | `line` | `15` |
 | `category` | `NEW` |
-| `callPath` | `…RecursiveAllocation#entry()…` → `…RecursiveAllocation#recurse(I)…` |
+| `callPath` | `RecursiveAllocation#entry()` → `RecursiveAllocation#recurse(int)` |
 
-Note that `callPath` shows `recurse` once, not four times. The path recorded is the one by which the
-walk **first** reached the method, not an unrolling of the recursion.
+Note the call path shows `recurse` **once**, not unrolled four deep. The path recorded is how the
+walk first reached the method, not a simulation of the recursion.
 
-## Why
+## Why one finding is the right answer
 
-The first thing `walk` does is check a visited set:
+The checker tracks which methods it has already walked, per annotated entry point. Reaching
+`recurse` a second time stops immediately, before any instruction is examined.
 
-```java
-private void walk(ClassNode owner, MethodNode method, List<String> callPath,
-                  Set<String> visited, …) {
-    if (!visited.add(key(owner, method))) {
-        return;
-    }
-    …
-```
+Two things follow:
 
-where `key` is `owner.name + "#" + method.name + method.desc`. Reaching `recurse` a second time
-returns immediately, before any instruction is examined.
+**It terminates.** The set of visited methods only grows and is bounded by the number of methods in
+your code, so no cycle can loop forever. This covers mutual recursion — `a` calls `b` calls `a` —
+as well as direct self-recursion.
 
-Two properties follow:
+**Each allocation site is reported once.** The question being answered is "can this path allocate",
+and one finding answers it. Reporting the same `new` four times because the runtime might reach it
+four times would be noise, not information — and the real answer is "an unbounded number of times",
+which no static analysis can enumerate.
 
-**Termination.** The set grows monotonically and is bounded by the number of methods in the index,
-so the traversal cannot loop. This covers mutual recursion (`a` → `b` → `a`) as well as direct
-self-recursion.
+## Reading the call path
 
-**One finding per site per entry point.** Because the guard fires before the instruction scan, the
-allocation at offset 4 is examined once. It does not matter that the recursion could reach it four
-times at runtime — the question the checker answers is "can this path allocate", and one finding
-answers it.
+Because the walk is depth-first, `callPath` is the route of **first discovery**, not necessarily the
+shortest route or the one you would have guessed. If a method is reachable several ways from the
+same entry point, you get the first one the walk happened to take.
 
-The `visited` set is created fresh for each annotated entry point in `walkEntry`, which is why a
-[shared helper reachable from two entry points](transitive-calls.md#one-helper-two-entry-points)
-produces two findings: two separate contracts, verified independently.
+That is enough to locate the violation. Do not read it as "the only way this is reached" — there may
+be others.
 
-## What this means for the call path
+## Recursion on a hot path
 
-`callPath` is the route of first discovery in a depth-first traversal, not necessarily the shortest
-route or the one you would guess. If a method is reachable by several paths from the same entry
-point, you get the first one the walk took. That is enough to locate the violation, but do not read
-it as "the only way this is reached".
+The checker is silent about the recursion itself, which is worth remembering: a deeply recursive
+method on a latency-sensitive path has costs it will never report — stack growth, no tail-call
+elimination in HotSpot, and a `StackOverflowError` that is
+[an exempt allocation](exceptions.md) when it happens.
+
+Zero allocations is not the same as fast.

@@ -42,7 +42,7 @@ Output:
 
 …
 
-TOTAL 31
+TOTAL 34
 ```
 
 That total is the number quoted across the scenario pages. If it changes, something in the
@@ -127,6 +127,6 @@ a scenario page and a test disagree, the test is right.
 ./gradlew build     # unit tests plus :core:agentTest, which launches a real JVM with -javaagent
 ```
 
-Tests marked `@Disabled` with a `GAP:` reason are not broken tests: each states behaviour the tool
-should have and names what it is waiting on. They are the source of the
-[Known gaps](../usage.md#known-gaps) list.
+The suite once carried a set of `@Disabled` tests, each stating behaviour the tool should have and
+naming the gap it was waiting on. All of them are now enabled and passing — so if a page here
+describes a limitation, check [Known gaps](../usage.md#known-gaps) before believing it.

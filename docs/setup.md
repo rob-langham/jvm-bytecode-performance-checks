@@ -94,8 +94,8 @@ plugins {
 }
 ```
 
-This registers a `checkStaticAllocation` task in the `verification` group. It analyses
-`build/classes/java/main` and throws a `GradleException` if there are any findings.
+This registers a `checkStaticAllocation` task in the `verification` group. It analyses the main
+source set's classes and fails the build if there are any findings.
 
 The task is **not** wired into `check` for you. To fail the normal build:
 
@@ -104,6 +104,27 @@ tasks.named("check") {
     dependsOn("checkStaticAllocation")
 }
 ```
+
+The task takes configuration:
+
+```kotlin
+tasks.named<StaticAllocationCheckerTask>("checkStaticAllocation") {
+    // Extra analysis roots — other modules, or jars. Directories or .jar/.zip archives.
+    classesDirs.from(project(":shared-domain").layout.buildDirectory.dir("classes/java/main"))
+
+    // Roots used only to resolve callees, never scanned for annotated entry points.
+    // Accepted and passed through; the analyser does not use it to widen resolution yet.
+    resolveClasspath.from(configurations.runtimeClasspath)
+
+    // Report findings without failing — for adopting this on an existing codebase.
+    ignoreFailures.set(true)
+
+    // Optional: write findings to a file, which also makes the task cacheable.
+    reportFile.set(layout.buildDirectory.file("reports/static-allocation.txt"))
+}
+```
+
+The task declares its inputs and outputs, so Gradle skips it when nothing has changed.
 
 ### Maven
 
@@ -123,10 +144,31 @@ tasks.named("check") {
 The `check` goal binds to the `verify` phase by default and analyses
 `${project.build.outputDirectory}`. It is `threadSafe`, so parallel builds are fine.
 
+It takes parameters:
+
+```xml
+<configuration>
+  <!-- Extra analysis roots: other modules, or jars. -->
+  <additionalRoots>
+    <additionalRoot>${project.basedir}/../shared-domain/target/classes</additionalRoot>
+  </additionalRoots>
+
+  <!-- Resolution-only roots. Passed through; not yet used to widen resolution. -->
+  <resolveClasspath/>
+
+  <!-- Report without failing, for adoption on an existing codebase. -->
+  <ignoreFailures>false</ignoreFailures>
+
+  <skip>false</skip>
+</configuration>
+```
+
+`skip` and `ignoreFailures` are also settable from the command line, as
+`-Dstatic-allocation-checker.skip` and `-Dstatic-allocation-checker.ignoreFailures`.
+
 ### Neither: call it directly
 
-The analyser is a plain library, which is the escape hatch when you need roots the plugins do not
-give you:
+The analyser is a plain library, which is the escape hatch when you want to drive it yourself:
 
 ```java
 Report report = new AllocationChecker().analyze(
@@ -146,9 +188,9 @@ parameter is accepted but not yet used to widen resolution.
 
 {: .warning }
 > Giving the checker too few roots does not make it quieter — it makes it noisier. Every call it
-> cannot resolve becomes an [`UNANALYZABLE_CALL`](scenarios/unanalyzable-calls.md) finding. The
-> build plugins pass exactly one root each, which is the single biggest limitation to be aware of
-> before you turn this on.
+> cannot resolve becomes an [`UNANALYZABLE_CALL`](scenarios/unanalyzable-calls.md) finding. Point it
+> at the modules your hot path actually calls into, and expect JDK calls to stay unresolved
+> regardless.
 
 ## Step 4 (optional): the runtime flight recorder
 

@@ -183,7 +183,7 @@ thread count, you have found an unsynchronised lazy init.
 | Count rises, then `new` is 0 for the rest of the run | Warmed up. Working as intended. |
 | `new` never reaches 0 | Not a warmup site. The guard depends on runtime values. |
 | Count ≈ thread count, then flat | Racy lazy init. Benign or not, it is doing N× the work. |
-| Count is 0 for a site you expected | Either that path never ran, or the method was not instrumented — see gaps below. |
+| Count is 0 for a site you expected | Either that path never ran, or the class was loaded before you attached. |
 | `lastSeenMillis` long after startup | The site fired late. Worth knowing even if the count is low. |
 
 The `new` column is the one to watch. Total counts are cumulative and always go up; what matters is
@@ -237,14 +237,10 @@ static check — just in the stage that has a workload attached.
 shapes where [the static contract is weakest](../scenarios/warmup-caching.md#a-loop): both pass, and
 both can allocate unboundedly.
 
-## Gaps to be aware of
+## Limits to be aware of
 
-- **Lambda bodies are not instrumented**
-  ([#2](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/2)). A lambda body
-  compiles to a synthetic method carrying no annotation, so a warmup method doing its work inside a
-  lambda records nothing. A count of 0 does not prove a site did not fire.
-- **On dynamic attach, bootstrap-loaded classes are skipped**, and anything that allocated before
-  you attached was never counted.
+- **On dynamic attach, bootstrap-loaded classes are skipped** — they cannot see the recorder the
+  injected probe calls — and anything that allocated before you attached was never counted.
 - **The recorder only sees `@AllocationsForWarmup` methods.** It is not a general allocation
   profiler — for that, use JFR's `ObjectAllocationSample` or async-profiler. This tool answers one
   narrow question: did the sites I declared as warmup actually stop firing?
