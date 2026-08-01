@@ -171,7 +171,6 @@ Known gaps, each tracked as an issue and pinned by a `@Disabled` test that names
 
 | | Gap |
 | --- | --- |
-| [#2](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/2) | Lambda bodies are not instrumented, so warmup work inside a lambda records nothing |
 | [#4](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/4) | An override silently drops the `@ZeroAllocations` contract |
 | [#6](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/6) | `VARARGS_ARRAY` is declared but never produced |
 | [#7](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/7) | Both annotations on one method: warmup silently wins |

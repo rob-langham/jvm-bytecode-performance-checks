@@ -85,6 +85,26 @@ public class ComplexControlFlow {
         return () -> sink.append(new Object());
     }
 
+    /** An ordinary method that happens to be usable as a method reference. */
+    public Object ordinaryFactory() {
+        return new Object();
+    }
+
+    /**
+     * Creates a lambda by method reference. The referenced method is ordinary code with its own
+     * contract, and must not become warmup code merely by being referenced from here.
+     */
+    @AllocationsForWarmup
+    public java.util.function.Supplier<Object> viaMethodReference() {
+        return this::ordinaryFactory;
+    }
+
+    /** A lambda whose body creates a further lambda, so selection has to be transitive. */
+    @AllocationsForWarmup
+    public java.util.function.Supplier<Runnable> nestedLambdaInLambda(StringBuilder sink) {
+        return () -> () -> sink.append(new Object());
+    }
+
     /** Two allocations of the same category on a single source line. */
     @AllocationsForWarmup
     public Object[] sameLine(boolean a, boolean b) {
