@@ -131,7 +131,10 @@ tasks.checkStaticAllocation {
 </plugin>
 ```
 
-Binds to the `verify` phase by default.
+Binds to the `verify` phase by default. Parameters: `skip`
+(`-Dstatic-allocation-checker.skip=true`), `ignoreFailures`, `additionalRoots` and
+`resolveClasspath`. A missing output directory is a `MojoExecutionException` — the check could not
+run — rather than a silent pass.
 
 ### Directly
 
@@ -188,14 +191,10 @@ Early — `0.1.0-SNAPSHOT`. Nothing is published to an artifact repository yet, 
 intended coordinates rather than something you can resolve today; consume the project via a
 composite build (`includeBuild`) for now.
 
-Known gaps, each tracked as an issue and pinned by a `@Disabled` test that names it:
+All eight gaps tracked after the first review round are now closed. `resolveClasspath` is accepted
+by the checker but still unused for widening callee resolution; the plugins pass it through ready
+for when it is.
 
-| | Gap |
-| --- | --- |
-| [#9](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/9) | Maven mojo takes no parameters and fails with an internal exception |
-
-The `resolveClasspath` parameter on `analyze` is accepted but not yet used to widen callee
-resolution.
 
 ## Licence
 
