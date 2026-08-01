@@ -11,6 +11,12 @@ on:
     paths:
       - 'docs/**'
       - '.github/workflows/docs.yml'
+  # Build (but do not deploy) on pull requests, so a site that does not build
+  # is caught before it is merged rather than after it is published.
+  pull_request:
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
   workflow_dispatch:
 
 permissions:
@@ -45,12 +51,22 @@ jobs:
           JEKYLL_ENV: production
         run: bundle exec jekyll build --baseurl "${{ steps.pages.outputs.base_path }}"
 
+      # A page rendered without the theme layout still returns 200, so assert on
+      # the markup instead: the layout is what carries the nav, search and title.
+      - name: Check the theme layout was applied
+        working-directory: docs
+        run: |
+          grep -q '<title>' _site/index.html
+          grep -q 'nav-list' _site/index.html
+          grep -q 'search' _site/index.html
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/_site
 
   deploy:
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

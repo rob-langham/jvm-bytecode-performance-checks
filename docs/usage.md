@@ -180,22 +180,22 @@ entry point. It does not mean:
 
 ## Known gaps
 
-Each of these has a `@Disabled` test in the suite naming it, so the test suite doubles as the work
-list.
+Each is tracked as an issue and pinned by a `@Disabled` test that names it, so the test suite
+doubles as the work list.
 
-- **Lambda bodies are not instrumented.** A lambda body compiles to a synthetic method carrying no
-  annotation, so a warmup method doing its work inside a lambda records nothing at runtime.
-- **Dynamic attach instruments nothing already loaded.** The agent jar declares
-  `Can-Retransform-Classes` but never calls `retransformClasses`, so attaching to a running JVM
-  misses every class loaded before attach. Use `-javaagent` at startup.
-- **Annotations are not inherited by overrides.** This matches Java's own rule, but means an
-  override silently drops the contract. See
-  [annotation semantics](scenarios/annotation-semantics.md#an-override-does-not-inherit-the-contract).
-- **Neither annotation can go on a constructor.** `@Target` is `{METHOD, TYPE}`; only a type-level
-  annotation reaches `<init>`.
-- **`VARARGS_ARRAY` is declared but never produced.** Varargs report as `NEW_ARRAY`.
-- **Both annotations on one method: warmup silently wins.** No error, no warning.
-- **The build plugins take no configuration.** No skip flag, no extra roots, no severity. A missing
-  classes directory passes silently under Gradle and throws an internal exception under Maven.
-- **`resolveClasspath` is accepted but unused.** Widening callee resolution without adding entry
-  points is not possible yet.
+| | Gap |
+| --- | --- |
+| [#2](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/2) | **Lambda bodies are not instrumented.** A lambda body compiles to a synthetic method carrying no annotation, so a warmup method doing its work inside a lambda records nothing at runtime. See [lambdas](scenarios/lambdas.md#the-gap-lambda-bodies-are-not-instrumented-at-runtime). |
+| [#4](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/4) | **An override silently drops the contract.** Annotations are not inherited, matching Java's own rule. See [annotation semantics](scenarios/annotation-semantics.md#an-override-does-not-inherit-the-contract). |
+| [#6](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/6) | **`VARARGS_ARRAY` is declared but never produced.** Varargs report as `NEW_ARRAY`. See [varargs](scenarios/varargs.md). |
+| [#7](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/7) | **Both annotations on one method: warmup silently wins.** No error, no warning. |
+| [#8](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/8) | **The Gradle task takes no configuration** — no skip flag, no extra roots — and passes silently when the classes directory is missing. |
+| [#9](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/9) | **The Maven mojo takes no parameters** and fails with an internal exception rather than a clean build error. |
+
+Also: **`resolveClasspath` is accepted but unused.** Widening callee resolution without also adding
+entry points is not possible yet.
+
+Two gaps that appeared in earlier versions of this page are now closed: annotating a constructor
+directly ([#5](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/5)) and
+retransforming already-loaded classes on dynamic attach
+([#3](https://github.com/rob-langham/jvm-bytecode-performance-checks/issues/3)).

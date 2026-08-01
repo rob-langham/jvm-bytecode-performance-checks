@@ -42,7 +42,7 @@ Output:
 
 …
 
-TOTAL 29
+TOTAL 31
 ```
 
 That total is the number quoted across the scenario pages. If it changes, something in the
