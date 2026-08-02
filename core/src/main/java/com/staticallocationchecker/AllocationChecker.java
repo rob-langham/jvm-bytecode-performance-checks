@@ -245,8 +245,19 @@ public final class AllocationChecker {
                         Finding.Kind.ZERO_ALLOCATION_VIOLATION,
                         className, method.name, method.desc, line, category, callPath));
             }
-            // Only a plain (non-allocating) call is a candidate for descent. Constructor calls
-            // (<init>) are construction, already represented by the paired allocation opcode.
+            // Only a plain (non-allocating) call is a candidate for descent.
+            //
+            // Constructor calls are deliberately not followed. The target is perfectly resolvable -
+            // INVOKESPECIAL <init> is statically bound, so there is no ambiguity to stop us - but
+            // descending would add noise without adding detection. On a zero-allocation path the
+            // NEW at this call site is already a violation, so the site is flagged and the fix is
+            // the same whether its constructor allocates once or twenty times. Reached from a
+            // warmup boundary, construction is sanctioned by design. Following it would instead
+            // report several findings per fix, and drag in a spurious unanalyzable call for the
+            // java.lang.Object.<init> that terminates every constructor chain.
+            //
+            // What a constructor allocates is still analysable: annotate its type or the
+            // constructor itself, or name it as an entry point.
             if (category == null && insn instanceof MethodInsnNode call && !call.name.equals("<init>")) {
                 // A call site may reach more than one body: the declaration it names, plus every
                 // indexed override reachable by virtual dispatch. All of them are on the hot path.
