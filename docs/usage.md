@@ -194,6 +194,36 @@ entry point. It does not mean:
 - **that the JIT will not allocate** — the checker sees bytecode. Scalar replacement can remove
   allocations the checker reports, and deoptimisation can reintroduce them.
 
+## Why constructor bodies are not followed
+
+A `new Foo()` on a hot path is reported once, as a `NEW` at that call site. The walk does not
+descend into `Foo`'s constructor, so if that constructor allocates a buffer and builds a string,
+you see one finding rather than three.
+
+That is deliberate, and not a limit of bytecode: `INVOKESPECIAL <init>` is statically bound, so the
+target is perfectly resolvable — more so than an ordinary virtual call. The reason is that
+descending would add noise without adding detection:
+
+- On a zero-allocation path, **the call site is already a violation.** The fix is the same whether
+  the constructor allocates once or twenty times: do not construct here. Several findings per fix
+  is worse reporting, not better.
+- Reached from an `@AllocationsForWarmup` boundary, **construction is sanctioned by design** — that
+  is what the boundary means.
+- Every constructor chain ends at `java.lang.Object.<init>`, which is outside any analysis root, so
+  following them would add a spurious [unanalyzable call](scenarios/unanalyzable-calls.md) per
+  construction.
+
+What a constructor allocates is still analysable when you want to know. Annotate the type or the
+constructor, or [name it as an entry point](setup.md#starting-somewhere-specific):
+
+```java
+List.of("com.example.Heavy#<init>")
+```
+
+The same reasoning is why growing a buffer during warmup is accepted. Expanding an array *must*
+discard the old one — that is what growth is — and the contract permits it. Whether the growing ever
+stops is a runtime property, which is what the [flight recorder](runtime/steady-state.md) is for.
+
 ## Known gaps
 
 All eight gaps tracked after the first review round are now closed. What remains:
