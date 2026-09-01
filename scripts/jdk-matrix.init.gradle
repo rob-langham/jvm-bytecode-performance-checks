@@ -1,0 +1,18 @@
+// Applied by scripts/jdk-docker-matrix.sh with -I. Without this, running Gradle on different JDKs
+// proves little: the build pins a Java 17 toolchain, so every test would still execute on a 17 JVM
+// no matter which JDK launched Gradle. This re-points the test launcher at the matrix JDK, so the
+// leg actually runs the suite on 17, 21 or 25. Compilation stays on the pinned 17 toolchain -
+// varying the bytecode is the cross-release fixture matrix's job, not this one's.
+def target = System.getProperty('matrix.test.jvm')
+if (target != null) {
+    gradle.allprojects { project ->
+        project.plugins.withId('java') {
+            def toolchains = project.extensions.getByType(org.gradle.jvm.toolchain.JavaToolchainService)
+            project.tasks.withType(Test).configureEach {
+                javaLauncher = toolchains.launcherFor {
+                    languageVersion = org.gradle.jvm.toolchain.JavaLanguageVersion.of(target.toInteger())
+                }
+            }
+        }
+    }
+}
