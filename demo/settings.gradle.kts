@@ -17,6 +17,13 @@ pluginManagement {
 // resolution only - the two are separate mechanisms.
 includeBuild("..")
 
+// Every scenario pins a Java 17 toolchain, so the same thing that would stop a contributor
+// building the library on a newer JDK would stop them running the demos. Gradle downloads 17
+// rather than failing with "No locally installed toolchains match".
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "0.9.0"
+}
+
 rootProject.name = "static-allocation-checker-demos"
 
 include(

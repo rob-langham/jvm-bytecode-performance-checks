@@ -32,10 +32,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 17 is the toolchain the project targets; 21 catches anything that depends on a
-        # particular JDK's bytecode or reflection behaviour, which for a bytecode tool is a real
-        # risk rather than a theoretical one.
-        java: ['17', '21']
+        # The JDK Gradle itself runs on, not the JDK the code is compiled for: the toolchain is
+        # pinned to 17 everywhere, so every job compiles the same bytecode and differs only in the
+        # JVM running the build and the tests. 17 is the target; 21 and 25 are the LTS releases
+        # after it, and for a bytecode tool "works on a newer JVM" is a real risk rather than a
+        # theoretical one - 25 in particular is where class-file major 69 shows up.
+        #
+        # On 21 and 25 the 17 toolchain is not installed at all: Gradle downloads it through the
+        # Foojay resolver configured in settings.gradle.kts, which also means these jobs are what
+        # proves that path still works for a contributor with only a newer JDK.
+        java: ['17', '21', '25']
     steps:
       - uses: actions/checkout@v4
 

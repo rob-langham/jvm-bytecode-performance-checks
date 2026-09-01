@@ -14,8 +14,13 @@ nav_order: 2
 
 ## Requirements
 
-- **Java 17 or later.** The build uses a Java 17 toolchain; the analyser reads class files up to
-  whatever version the bundled ASM 9.7.1 supports.
+- **Java 17 or later to run the checker.** The code it checks can be much older: bytecode
+  compiled for Java 8, 11, 17, 21 and 25 is supported — the policy is 8, 11, and then every LTS.
+  The hard ceiling is whatever class-file version the bundled ASM (currently 9.10.1) understands;
+  a class file newer than that fails the build with a message naming both versions and saying the
+  fix is a newer checker, because "failed to parse" would read as corruption and it is not.
+- **Compiling with `--release 8`?** Still fine: the annotations inside the `core` jar are
+  themselves compiled for Java 8, so javac accepts them on the oldest supported compile classpath.
 - **A build that produces `.class` files.** The checker analyses compiled bytecode, not source. It
   runs after compilation, never instead of it.
 

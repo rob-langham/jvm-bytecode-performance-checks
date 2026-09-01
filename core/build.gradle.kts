@@ -13,9 +13,47 @@ dependencies {
     implementation("org.ow2.asm:asm-analysis:$asmVersion")
 }
 
+// ---------------------------------------------------------------------------------------------
+// The annotations are compiled at release 8, everything else at 17.
+//
+// A project building with `--release 8` cannot have a major-61 class file on its compile
+// classpath: javac rejects the whole jar, not just the class. The annotations are the only part
+// of this library a checked project actually compiles against, so if they were major 61 the tool
+// would be unusable for exactly the oldest bytecode it claims to analyse. They are two bare
+// @interface declarations with nothing in them that Java 8 lacks, so compiling them at 8 costs
+// nothing.
+//
+// They live in their own source set for that reason alone. The package is unchanged - the checker
+// matches the annotations by descriptor string (see ZERO_ALLOCATIONS in AllocationChecker), so
+// moving the binary names would break it silently - and their classes are folded back into main's
+// output, so the library jar, the agent jar and every consumer see one artifact as before.
+val annotations: SourceSet by sourceSets.creating
+
+tasks.named<JavaCompile>(annotations.compileJavaTaskName) {
+    options.release = 8
+}
+
+val mainOutput = sourceSets.main.get().output
+
+// classesDirs rather than output.dir(): only classesDirs is what the `classes` variant publishes,
+// and that variant is what a composite build compiles against. Adding them anywhere else would
+// work for the jar and fail for `includeBuild`, which is how the demos consume this.
+(mainOutput.classesDirs as ConfigurableFileCollection).from(annotations.output.classesDirs)
+tasks.named("classes") { dependsOn(annotations.classesTaskName) }
+
+sourceSets.main { compileClasspath += annotations.output }
+
 // The sources and javadoc jars Central requires are added by the publish plugin, so they are
 // deliberately not declared here - declaring both produces two artifacts with the same
-// classifier and the publication is rejected.
+// classifier and the publication is rejected. They are built from main's sources, which no longer
+// include the annotations, so those are added back.
+tasks.withType<Jar>().matching { it.name == "sourcesJar" }.configureEach {
+    from(annotations.allSource)
+}
+tasks.withType<Javadoc>().configureEach {
+    source(annotations.allJava)
+    classpath += annotations.output
+}
 
 // The agent can only really be tested by launching a JVM with -javaagent, which needs the built
 // jar. That is a different dependency shape from the unit tests, so it gets its own source set.
