@@ -130,7 +130,7 @@ The task declares its inputs and outputs, so Gradle skips it when nothing has ch
 
 ```xml
 <plugin>
-  <groupId>com.staticallocationchecker</groupId>
+  <groupId>io.github.rob-langham</groupId>
   <artifactId>maven-plugin</artifactId>
   <version>0.1.0</version>
   <executions>

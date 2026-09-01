@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Both annotations on one declaration.
+
+  Self-contained on purpose: no parent POM, so everything this scenario needs is on this page -
+  the annotations dependency, and the checker plugin bound to `verify`. Copy it as it stands.
+
+  Needs `./gradlew publishToMavenLocal` at the repo root first; both artifacts resolve from
+  Maven Local.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.github.rob-langham.demos</groupId>
+  <artifactId>06-conflicting-contracts</artifactId>
+  <version>0.1.0</version>
+
+  <properties>
+    <maven.compiler.release>17</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <!-- The annotations. Nothing else is needed at compile time. -->
+      <groupId>io.github.rob-langham</groupId>
+      <artifactId>core</artifactId>
+      <version>0.1.0</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>io.github.rob-langham</groupId>
+        <artifactId>maven-plugin</artifactId>
+        <version>0.1.0</version>
+        <executions>
+          <execution>
+            <goals><goal>check</goal></goals>
+          </execution>
+        </executions>
+          <configuration>
+            <!-- This scenario exists to show findings, so it must not fail its own build.
+                 A real project would leave this alone and let the build break. -->
+            <ignoreFailures>true</ignoreFailures>
+          </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

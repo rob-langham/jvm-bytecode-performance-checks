@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The Maven side of the demos: one module per scenario, exactly as with Gradle.
+
+  This aggregator does nothing but list them. It is deliberately not a parent POM - each
+  scenario's pom.xml repeats its own coordinates, compiler settings and plugin block so it
+  can be read on its own and copied straight into a real project. The duplication is the point.
+
+  Both the plugin and the annotations come from Maven Local, so publish them first:
+      ./gradlew publishToMavenLocal
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.github.rob-langham.demos</groupId>
+  <artifactId>demos</artifactId>
+  <version>0.1.0</version>
+  <packaging>pom</packaging>
+  <name>Static allocation checker demos</name>
+
+  <modules>
+    <module>01-zero-allocation-basics</module>
+    <module>02-clean-hot-path</module>
+    <module>03-warmup-contract</module>
+    <module>04-dispatch-and-inheritance</module>
+    <module>05-varargs</module>
+    <module>06-conflicting-contracts</module>
+    <module>07-runtime-flight-recorder</module>
+  </modules>
+</project>
