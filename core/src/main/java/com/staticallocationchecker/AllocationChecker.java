@@ -258,7 +258,12 @@ public final class AllocationChecker {
             //
             // What a constructor allocates is still analysable: annotate its type or the
             // constructor itself, or name it as an entry point.
-            if (category == null && insn instanceof MethodInsnNode call && !call.name.equals("<init>")) {
+            // The append/toString calls of a string concatenation the compiler expanded into a
+            // StringBuilder chain are skipped too: the chain's allocation is already reported at
+            // its NEW, and descending into the JDK from there produces a trail of unanalyzable
+            // calls for what the source writes as a single `a + b`.
+            if (category == null && insn instanceof MethodInsnNode call && !call.name.equals("<init>")
+                    && !Allocations.isStringConcatChainMember(call)) {
                 // A call site may reach more than one body: the declaration it names, plus every
                 // indexed override reachable by virtual dispatch. All of them are on the hot path.
                 List<ClassHierarchy.MethodRef> targets =

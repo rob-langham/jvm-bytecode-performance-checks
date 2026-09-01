@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.staticallocationchecker.fixtures.Dispatch;
 import com.staticallocationchecker.fixtures.Inheritance;
 import com.staticallocationchecker.fixtures.Varargs;
+import com.staticallocationchecker.fixtures.VarargsArguments;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -104,6 +105,40 @@ class ResolutionTest {
         assertEquals(AllocationCategory.VARARGS_ARRAY, byMethod.get("passesObjectVarargs"));
         assertEquals(AllocationCategory.NEW_ARRAY, byMethod.get("passesExplicitArrayToAnOrdinaryParameter"),
                 "identical bytecode to a varargs call site; only the callee's flag tells them apart");
+    }
+
+    @Test
+    void recognisesAVarargsCallSiteWhoseArgumentsAllocateFirst() {
+        Map<String, List<AllocationCategory>> byMethod = categoriesByMethod(VarargsArguments.class);
+
+        assertEquals(List.of(AllocationCategory.VARARGS_ARRAY, AllocationCategory.BOXING,
+                        AllocationCategory.BOXING),
+                byMethod.get("boxedArguments"),
+                "the boxing conversions sit between the array and the call that consumes it");
+        assertEquals(List.of(AllocationCategory.VARARGS_ARRAY, AllocationCategory.NEW),
+                byMethod.get("constructedArgument"),
+                "an argument constructed into the array does not hide the call site");
+        assertEquals(List.of(AllocationCategory.VARARGS_ARRAY, AllocationCategory.BOXING),
+                byMethod.get("formattedArguments"),
+                "String.format is the varargs call every hot path meets first");
+    }
+
+    @Test
+    void recognisesAVarargsCallSiteNestedInsideAnother() {
+        assertEquals(
+                List.of(AllocationCategory.VARARGS_ARRAY, AllocationCategory.VARARGS_ARRAY,
+                        AllocationCategory.BOXING),
+                categoriesByMethod(VarargsArguments.class).get("varargsWithinVarargs"),
+                "both call sites synthesise an array, and neither masks the other");
+    }
+
+    /** Allocation categories, in bytecode order, per method of a fixture. */
+    private Map<String, List<AllocationCategory>> categoriesByMethod(Class<?> fixture) {
+        return findingsFor(analyze(), fixture).stream()
+                .filter(f -> f.category() != null)
+                .collect(Collectors.groupingBy(
+                        Finding::methodName,
+                        Collectors.mapping(Finding::category, Collectors.toList())));
     }
 
     @Test
