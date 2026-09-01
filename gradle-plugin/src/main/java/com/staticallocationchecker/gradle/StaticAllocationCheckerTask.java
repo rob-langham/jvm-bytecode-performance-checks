@@ -60,7 +60,17 @@ public abstract class StaticAllocationCheckerTask extends DefaultTask {
             resolveClasspath.add(entry.toPath());
         }
 
-        Report report = new AllocationChecker().analyze(roots, resolveClasspath);
+        Report report;
+        try {
+            report = new AllocationChecker().analyze(roots, resolveClasspath);
+        } catch (RuntimeException e) {
+            // The checker throws unchecked when it cannot read what it was pointed at, and its
+            // message is the actionable part. Letting that escape raw makes Gradle print an
+            // internal stack trace with the guidance buried in it; GradleException is Gradle's
+            // word for "this task could not do its job", which is exactly what happened.
+            throw new GradleException("static-allocation-checker could not analyse "
+                    + getClassesDirs().getFiles() + ": " + e.getMessage(), e);
+        }
         report.findings().forEach(finding -> getLogger().warn("static-allocation-checker: {}", finding));
         writeReport(report);
 

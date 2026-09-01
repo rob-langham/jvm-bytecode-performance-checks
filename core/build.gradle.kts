@@ -3,7 +3,9 @@ plugins {
     id("com.gradleup.shadow") version "8.3.5"
 }
 
-val asmVersion = "9.7.1"
+// 9.7.1 refused class-file major 69, so anything compiled by a Java 25 javac was unreadable.
+// Bytecode support only ever arrives in a newer ASM, so this pin is the checker's real ceiling.
+val asmVersion = "9.10.1"
 
 dependencies {
     implementation("org.ow2.asm:asm:$asmVersion")

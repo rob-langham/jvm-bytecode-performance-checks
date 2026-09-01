@@ -572,6 +572,14 @@ public final class AllocationChecker {
             reader.accept(node, ClassReader.SKIP_FRAMES);
             return node;
         } catch (RuntimeException e) {
+            if (BytecodeSupport.isUnsupportedVersion(e)) {
+                // Worth its own message: "Failed to parse Foo.class" reads as "your class file is
+                // corrupt", and sends the user hunting a bug that is not theirs. The real story is
+                // that the checker is older than the compiler, and only an upgrade fixes it.
+                throw new IllegalStateException(
+                        BytecodeSupport.tooNewMessage(description, BytecodeSupport.majorVersionOf(classBytes)),
+                        e);
+            }
             throw new IllegalStateException("Failed to parse " + description, e);
         }
     }
