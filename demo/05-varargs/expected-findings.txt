@@ -1,0 +1,8 @@
+# What the checker reports for this scenario, counted by the demo build's `demo` task.
+#
+# Identical bytecode, different categories - only the callee's ACC_VARARGS flag separates them.
+# Deliberately absent: publishExisting() and publishViaOverload(), which allocate nothing.
+#
+# Format: KIND | class#method | CATEGORY
+ZERO_ALLOCATION_VIOLATION | varargs.Telemetry#publish | VARARGS_ARRAY
+ZERO_ALLOCATION_VIOLATION | varargs.Telemetry#publishExplicitArray | NEW_ARRAY

@@ -1,0 +1,7 @@
+# What the checker reports for this scenario, counted by the demo build's `demo` task.
+#
+# Deliberately absent: PriceLevels, where a type-level contract and a method-level one
+# coexist. That is a deliberate exception, not a conflict.
+#
+# Format: KIND | class#method | CATEGORY
+CONFLICTING_CONTRACTS | conflict.Contradiction#confused | null

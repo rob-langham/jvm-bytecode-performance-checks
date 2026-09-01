@@ -1,0 +1,12 @@
+# What the checker reports for this scenario, counted by the demo build's `demo` task.
+#
+# Every allocation category, plus the JDK call the checker cannot follow.
+# Deliberately absent: noOp() (non-capturing lambda) and reject() (Throwable is exempt).
+#
+# Format: KIND | class#method | CATEGORY
+UNANALYZABLE_CALL | basics.OrderBook#lookup | null
+ZERO_ALLOCATION_VIOLATION | basics.OrderBook#describe | STRING_CONCAT
+ZERO_ALLOCATION_VIOLATION | basics.OrderBook#directNew | NEW
+ZERO_ALLOCATION_VIOLATION | basics.OrderBook#lookup | BOXING
+ZERO_ALLOCATION_VIOLATION | basics.OrderBook#onFill | LAMBDA
+ZERO_ALLOCATION_VIOLATION | basics.OrderBook#scratchBuffer | NEW_ARRAY

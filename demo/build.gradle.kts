@@ -15,16 +15,14 @@ subprojects {
 
 /**
  * How many findings each scenario should produce, read from the `expected-findings.txt` that sits
- * beside it.
+ * beside it, or null when the file is missing - which the demo task treats as a failure, never as
+ * "nothing to verify".
  *
- * <p>That same file is asserted in full - kind, method and category, not merely the count - by
- * `DemoScenarioTest` in the library build, which compiles these scenarios and runs the checker over
- * them. Keeping both checks on one file is what stops the demos and their documentation drifting
- * apart, which is the failure this whole arrangement exists to prevent.
- *
- * <p>The count still matters here because most scenarios set `ignoreFailures` so they can show
- * their output rather than halting the run: without an assertion, a checker that silently stopped
- * finding anything would leave every demo passing and every README quietly wrong.
+ * <p>This count is the only verification the scenarios have: most of them set `ignoreFailures` so
+ * they can show their output rather than halting the run, so without it a checker that silently
+ * stopped finding anything would leave every demo passing and every README quietly wrong. That is
+ * exactly what happened once before, when these files were deleted and this check degraded to a
+ * no-op without anyone noticing - hence missing now means broken.
  */
 fun expectedFindingCount(scenario: Project): Int? {
     val file = scenario.file("expected-findings.txt")
@@ -66,7 +64,10 @@ tasks.register("demo") {
             } else {
                 findings.forEach { println("   $it") }
             }
-            if (expected != null && findings.size != expected) {
+            if (expected == null) {
+                wrong += "${scenario.name}: no expected-findings.txt beside the scenario, so its " +
+                    "output was not verified at all"
+            } else if (findings.size != expected) {
                 wrong += "${scenario.name}: expected $expected finding(s), got ${findings.size}"
             }
         }
