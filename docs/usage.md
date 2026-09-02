@@ -176,6 +176,11 @@ tasks.named<StaticAllocationCheckerTask>("checkStaticAllocation") {
 
 Roots can be directories or `.jar`/`.zip` archives.
 
+**A multi-release jar holds the same class more than once.** By default only its base entries are
+read, which is what a Java 8 JVM loads. If your application runs on something newer, say so — see
+[multi-release jars](setup.md#multi-release-jars-jep-238) — or the copy analysed is not the copy
+that runs.
+
 **Do not point it at the JDK.** Calls into `java.*` will always be unanalyzable in practice. The
 realistic approach is to not have `java.*` calls on the annotated path — which, on a genuine
 zero-allocation path, is roughly the position you want to be in anyway.

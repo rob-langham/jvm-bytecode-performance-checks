@@ -10,6 +10,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
+import java.util.jar.Attributes;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
+import java.util.jar.Manifest;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
 import org.junit.jupiter.api.Test;
@@ -65,6 +69,7 @@ class StaticAllocationCheckerMojoTest {
         assertTrue(descriptor.contains("<name>ignoreFailures</name>"), descriptor);
         assertTrue(descriptor.contains("<name>additionalRoots</name>"), descriptor);
         assertTrue(descriptor.contains("<name>resolveClasspath</name>"), descriptor);
+        assertTrue(descriptor.contains("<name>targetRelease</name>"), descriptor);
         assertTrue(descriptor.contains("static-allocation-checker.skip"),
                 "the skip flag needs a -D property to be usable from the command line");
     }
@@ -126,6 +131,81 @@ class StaticAllocationCheckerMojoTest {
 
         assertThrows(MojoFailureException.class, mojo::execute,
                 "a finding in an additional root must still fail the build");
+    }
+
+    /**
+     * The release the module compiles for is where a Maven build already says which JVM it builds
+     * for, so that is where the multi-release target comes from unless it is set explicitly.
+     */
+    @Test
+    void generatedDescriptorDefaultsTargetReleaseToTheCompilerRelease() throws IOException {
+        String descriptor = Files.readString(Path.of(System.getProperty("pluginDescriptor")));
+
+        assertTrue(descriptor.contains("default-value=\"${maven.compiler.release}\""), descriptor);
+        assertTrue(descriptor.contains("static-allocation-checker.targetRelease"),
+                "settable from the command line, for a deployment JVM newer than the compile target");
+    }
+
+    @Test
+    void targetReleaseDecidesWhichCopyOfAMultiReleaseJarIsChecked(@TempDir Path dir)
+            throws Exception {
+        Path empty = Files.createDirectories(dir.resolve("classes"));
+        Path jar = multiReleaseJarWithVersionedAllocation(dir.resolve("dependency.jar"));
+
+        StaticAllocationCheckerMojo baseOnly = mojoFor(empty);
+        set(baseOnly, "additionalRoots", List.of(jar.toFile()));
+        assertDoesNotThrow(baseOnly::execute,
+                "unset means base entries only, and there is no allocating base entry here");
+
+        StaticAllocationCheckerMojo atSeventeen = mojoFor(empty);
+        set(atSeventeen, "additionalRoots", List.of(jar.toFile()));
+        set(atSeventeen, "targetRelease", "17");
+
+        assertThrows(MojoFailureException.class, atSeventeen::execute,
+                "at release 17 the versioned copy is the one that runs, and it allocates");
+    }
+
+    @Test
+    void aTargetReleaseThatIsNotAReleaseNumberIsAConfigurationError(@TempDir Path dir)
+            throws Exception {
+        StaticAllocationCheckerMojo mojo = mojoFor(Files.createDirectories(dir.resolve("classes")));
+        set(mojo, "targetRelease", "seventeen");
+
+        MojoExecutionException thrown = assertThrows(MojoExecutionException.class, mojo::execute,
+                "falling back to base-only would analyse a different jar than the user asked for"
+                        + " and still call the build checked");
+
+        assertTrue(thrown.getMessage().contains("targetRelease"), thrown.getMessage());
+    }
+
+    @Test
+    void anEmptyTargetReleaseMeansBaseEntriesOnly(@TempDir Path dir) throws Exception {
+        // ${maven.compiler.release} resolves to an empty string in a build that never defined it.
+        Path empty = Files.createDirectories(dir.resolve("classes"));
+        Path jar = multiReleaseJarWithVersionedAllocation(dir.resolve("dependency.jar"));
+        StaticAllocationCheckerMojo mojo = mojoFor(empty);
+        set(mojo, "additionalRoots", List.of(jar.toFile()));
+        set(mojo, "targetRelease", "");
+
+        assertDoesNotThrow(mojo::execute);
+    }
+
+    /**
+     * A multi-release jar whose only class lives under {@code META-INF/versions/17} - invisible
+     * below release 17, an allocating hot path at or above it.
+     */
+    private static Path multiReleaseJarWithVersionedAllocation(Path target) throws IOException {
+        String resource = "com/staticallocationchecker/fixtures/DirectNew.class";
+        Manifest manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        manifest.getMainAttributes().putValue("Multi-Release", "true");
+        try (JarOutputStream out = new JarOutputStream(Files.newOutputStream(target), manifest)) {
+            out.putNextEntry(new JarEntry("META-INF/versions/17/" + resource));
+            out.write(Files.readAllBytes(
+                    Path.of(System.getProperty("fixtureClasses")).resolve(resource)));
+            out.closeEntry();
+        }
+        return target;
     }
 
     private static void copyFixtureTo(Path target) throws IOException {

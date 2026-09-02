@@ -43,6 +43,39 @@ public abstract class StaticAllocationCheckerTask extends DefaultTask {
     @PathSensitive(PathSensitivity.RELATIVE)
     public abstract ConfigurableFileCollection getResolveClasspath();
 
+    /**
+     * The Java release the analysed code will run on, used to resolve multi-release jars (JEP 238)
+     * the way the running JVM will.
+     *
+     * <p>A multi-release dependency carries the same class more than once - a base copy, and a copy
+     * under {@code META-INF/versions/N/} for JVMs at release {@code N} or above - and the copies are
+     * not equivalent. Analysing the base copy of a jar whose modern copy is the one that actually
+     * runs reports on code the application never executes, and an allocation added in the modern
+     * copy goes unseen.
+     *
+     * <p>The convention is the project's own compile target: {@code compileJava}'s
+     * {@code options.release} if it is set, otherwise the java extension's target compatibility -
+     * which itself follows the toolchain. That is the right default because it is where "which JVM
+     * is this built for" already lives, and it is the answer for the overwhelmingly common case of
+     * an application built for the JVM it runs on.
+     *
+     * <p>Override it when those differ - an application compiled at release 8 for compatibility but
+     * deployed on a 21 JVM should set {@code targetRelease = 21}, because 21 is the release whose
+     * versioned entries will be loaded:
+     *
+     * <pre>{@code
+     * tasks.named<StaticAllocationCheckerTask>("checkStaticAllocation") {
+     *     targetRelease.set(21)
+     * }
+     * }</pre>
+     *
+     * <p>Unset - which is what happens when the java plugin is not applied - means base entries
+     * only, the behaviour of every release before this property existed.
+     */
+    @Input
+    @Optional
+    public abstract Property<Integer> getTargetRelease();
+
     /** When true, findings are logged but do not fail the build. Defaults to false. */
     @Input
     public abstract Property<Boolean> getIgnoreFailures();
@@ -62,7 +95,8 @@ public abstract class StaticAllocationCheckerTask extends DefaultTask {
 
         Report report;
         try {
-            report = new AllocationChecker().analyze(roots, resolveClasspath);
+            report = new AllocationChecker(getTargetRelease().getOrElse(0))
+                    .analyze(roots, resolveClasspath);
         } catch (RuntimeException e) {
             // The checker throws unchecked when it cannot read what it was pointed at, and its
             // message is the actionable part. Letting that escape raw makes Gradle print an
