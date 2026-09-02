@@ -1,5 +1,7 @@
 package com.staticallocationchecker;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -42,7 +44,7 @@ public final class Finding {
         this.methodDescriptor = methodDescriptor;
         this.line = line;
         this.category = category;
-        this.callPath = List.copyOf(callPath);
+        this.callPath = Collections.unmodifiableList(new ArrayList<>(callPath));
     }
 
     public Kind kind() {
@@ -78,9 +80,10 @@ public final class Finding {
         if (this == o) {
             return true;
         }
-        if (!(o instanceof Finding other)) {
+        if (!(o instanceof Finding)) {
             return false;
         }
+        Finding other = (Finding) o;
         return line == other.line
                 && kind == other.kind
                 && Objects.equals(className, other.className)

@@ -82,7 +82,7 @@ public final class TypeOracle {
                     return null;
                 }
                 ClassNode node = new ClassNode();
-                new ClassReader(in.readAllBytes())
+                new ClassReader(Streams.readAllBytes(in))
                     .accept(node, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
                 return node;
             } catch (IOException | RuntimeException e) {

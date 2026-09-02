@@ -53,9 +53,10 @@ public final class SiteRecord {
         if (this == o) {
             return true;
         }
-        if (!(o instanceof SiteRecord other)) {
+        if (!(o instanceof SiteRecord)) {
             return false;
         }
+        SiteRecord other = (SiteRecord) o;
         return count == other.count
                 && firstSeenMillis == other.firstSeenMillis
                 && lastSeenMillis == other.lastSeenMillis;

@@ -13,8 +13,9 @@ import com.staticallocationchecker.annotations.ZeroAllocations;
  * of that, and this is where that claim is actually tested.
  *
  * <p>The annotations are applied directly rather than through a named entry point, which is only
- * possible because they are compiled at release 8 themselves (see the annotations source set in
- * core/build.gradle.kts). The release-8 row of this matrix is therefore also the end-to-end proof
+ * possible because they are compiled at release 8 themselves, along with the rest of the library
+ * (see core/build.gradle.kts). The release-8 row of this matrix is therefore also the end-to-end
+ * proof
  * that a release-8 project can use this library at all.
  */
 public class HotPath {

@@ -4,9 +4,10 @@ A static analyser for JVM bytecode that enforces allocation contracts on hot pat
 method as zero-allocation, and the checker walks its bytecode — and everything it calls
 transitively — failing the build on any heap allocation it finds.
 
-Built on [ASM](https://asm.ow2.io/). Runs on Java 17+ and analyses bytecode compiled for
-Java 8, 11, 17, 21 or 25 — the annotations themselves are compiled for Java 8, so even a
-`--release 8` build can declare the contracts. Apache 2.0.
+Built on [ASM](https://asm.ow2.io/). The library and the agent run on Java 8+ and analyse
+bytecode compiled for Java 8, 11, 17, 21 or 25, so a `--release 8` build can declare the
+contracts and a legacy JDK 8 production JVM can carry the flight recorder. The Gradle and Maven
+plugins are the exception: they need a build running on Java 17+. Apache 2.0.
 
 ### 📖 **[Read the documentation →](https://rob-langham.github.io/jvm-bytecode-performance-checks/)**
 
@@ -71,8 +72,10 @@ Or run the demos, which need nothing published:
 ```
 
 `./gradlew build` includes `:core:agentTest`, which launches real JVMs with `-javaagent` and
-attaches to a running one. CI runs everything on JDK 17, 21 and 25; any JDK works locally, since
-the pinned Java 17 toolchain downloads itself if missing.
+attaches to a running one. CI runs everything on JDK 17, 21 and 25 and additionally runs the
+checker itself on real JDK 8 and 11 JVMs; any JDK works locally, since the pinned Java 17
+toolchain downloads itself if missing. The tests are compiled at 17 — only the shipped library is
+release 8.
 
 ## Status
 

@@ -14,45 +14,27 @@ dependencies {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The annotations are compiled at release 8, everything else at 17.
+// The whole library is compiled at release 8.
 //
 // A project building with `--release 8` cannot have a major-61 class file on its compile
-// classpath: javac rejects the whole jar, not just the class. The annotations are the only part
-// of this library a checked project actually compiles against, so if they were major 61 the tool
-// would be unusable for exactly the oldest bytecode it claims to analyse. They are two bare
-// @interface declarations with nothing in them that Java 8 lacks, so compiling them at 8 costs
-// nothing.
+// classpath: javac rejects the whole jar, not just the class. That used to force the annotations -
+// the only part of this library a checked project compiles against - into a source set of their
+// own. It is no longer a special case: the analyser, the classifier, the runtime recorder and the
+// agent all target 8 too, so the checker runs on the oldest JVM whose bytecode it claims to
+// analyse, and the annotations are ordinary main sources again.
 //
-// They live in their own source set for that reason alone. The package is unchanged - the checker
-// matches the annotations by descriptor string (see ZERO_ALLOCATIONS in AllocationChecker), so
-// moving the binary names would break it silently - and their classes are folded back into main's
-// output, so the library jar, the agent jar and every consumer see one artifact as before.
-val annotations: SourceSet by sourceSets.creating
-
-tasks.named<JavaCompile>(annotations.compileJavaTaskName) {
+// The toolchain stays at 17 - a javac 17 emits release-8 class files perfectly well - so only the
+// language level of main is affected. The test, agentTest and crossReleaseFixtures source sets are
+// untouched and still compile at 17.
+// ---------------------------------------------------------------------------------------------
+tasks.named<JavaCompile>("compileJava") {
     options.release = 8
+    // javac warns that release 8 is obsolete. It is, and supporting it is the point.
+    options.compilerArgs.add("-Xlint:-options")
 }
 
-val mainOutput = sourceSets.main.get().output
-
-// classesDirs rather than output.dir(): only classesDirs is what the `classes` variant publishes,
-// and that variant is what a composite build compiles against. Adding them anywhere else would
-// work for the jar and fail for `includeBuild`, which is how the demos consume this.
-(mainOutput.classesDirs as ConfigurableFileCollection).from(annotations.output.classesDirs)
-tasks.named("classes") { dependsOn(annotations.classesTaskName) }
-
-sourceSets.main { compileClasspath += annotations.output }
-
-// The sources and javadoc jars Central requires are added by the publish plugin, so they are
-// deliberately not declared here - declaring both produces two artifacts with the same
-// classifier and the publication is rejected. They are built from main's sources, which no longer
-// include the annotations, so those are added back.
-tasks.withType<Jar>().matching { it.name == "sourcesJar" }.configureEach {
-    from(annotations.allSource)
-}
 tasks.withType<Javadoc>().configureEach {
-    source(annotations.allJava)
-    classpath += annotations.output
+    (options as StandardJavadocDocletOptions).source = "8"
 }
 
 // The agent can only really be tested by launching a JVM with -javaagent, which needs the built
@@ -124,12 +106,12 @@ fun registerCrossReleaseCompilation(name: String, sourceDir: String, levels: Lis
             // before; the fix is to declare the wiring, not to remember to run --rerun-tasks.
             source = fileTree(layout.projectDirectory.dir(sourceDir))
             include("**/*.java")
-            classpath = files(annotations.output.classesDirs)
+            classpath = files(sourceSets.main.get().output.classesDirs)
             destinationDirectory = layout.buildDirectory.dir("crossReleaseFixtures/$name/$level")
             options.release = level
             // javac 25 warns that source 8 is obsolete. It is, and that is the point of the row.
             options.compilerArgs.add("-Xlint:-options")
-            dependsOn(annotations.classesTaskName)
+            dependsOn(tasks.named("classes"))
         }
     }
 
