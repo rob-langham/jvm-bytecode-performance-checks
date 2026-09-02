@@ -1,5 +1,7 @@
 package com.staticallocationchecker;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -19,9 +21,11 @@ import org.objectweb.asm.tree.TypeInsnNode;
  */
 public final class Allocations {
 
-    private static final Set<String> WRAPPER_TYPES = Set.of(
-            "java/lang/Integer", "java/lang/Long", "java/lang/Short", "java/lang/Byte",
-            "java/lang/Character", "java/lang/Boolean", "java/lang/Float", "java/lang/Double");
+    private static final Set<String> WRAPPER_TYPES = Collections.unmodifiableSet(
+            new HashSet<>(Arrays.asList(
+                    "java/lang/Integer", "java/lang/Long", "java/lang/Short", "java/lang/Byte",
+                    "java/lang/Character", "java/lang/Boolean", "java/lang/Float",
+                    "java/lang/Double")));
 
     private static final String STRING_CONCAT_FACTORY = "java/lang/invoke/StringConcatFactory";
     private static final String LAMBDA_METAFACTORY = "java/lang/invoke/LambdaMetafactory";
@@ -55,10 +59,10 @@ public final class Allocations {
             AbstractInsnNode insn,
             Predicate<String> isThrowableType,
             Predicate<MethodInsnNode> isVarargsCall) {
-        if (insn instanceof InvokeDynamicInsnNode indy) {
-            return invokeDynamicCategory(indy);
+        if (insn instanceof InvokeDynamicInsnNode) {
+            return invokeDynamicCategory((InvokeDynamicInsnNode) insn);
         }
-        if (insn instanceof MethodInsnNode call && isBoxing(call)) {
+        if (insn instanceof MethodInsnNode && isBoxing((MethodInsnNode) insn)) {
             return AllocationCategory.BOXING;
         }
         switch (insn.getOpcode()) {
@@ -100,7 +104,8 @@ public final class Allocations {
             AbstractInsnNode arrayAllocation, Predicate<MethodInsnNode> isVarargsCall) {
         int depth = 1; // stack slots above the array, counting the array itself
         for (AbstractInsnNode insn = arrayAllocation.getNext(); insn != null; insn = insn.getNext()) {
-            if (insn instanceof MethodInsnNode call) {
+            if (insn instanceof MethodInsnNode) {
+                MethodInsnNode call = (MethodInsnNode) insn;
                 int popped = callPops(call);
                 if (depth - popped < 1) {
                     return depth == 1 && lastParameterIsArray(call.desc) && isVarargsCall.test(call);
@@ -108,7 +113,8 @@ public final class Allocations {
                 depth += Type.getReturnType(call.desc).getSize() - popped;
                 continue;
             }
-            if (insn instanceof InvokeDynamicInsnNode indy) {
+            if (insn instanceof InvokeDynamicInsnNode) {
+                InvokeDynamicInsnNode indy = (InvokeDynamicInsnNode) insn;
                 int popped = argumentSlots(indy.desc);
                 if (depth - popped < 1) {
                     return false; // an indy call site is never a varargs call site
@@ -140,7 +146,8 @@ public final class Allocations {
      * calls into the JDK, for what the source writes as a single {@code a + b}.
      */
     public static boolean isStringConcatChainMember(AbstractInsnNode insn) {
-        if (!(insn instanceof MethodInsnNode call) || !STRING_BUILDER.equals(call.owner)) {
+        if (!(insn instanceof MethodInsnNode)
+                || !STRING_BUILDER.equals(((MethodInsnNode) insn).owner)) {
             return false;
         }
         for (AbstractInsnNode previous = insn.getPrevious(); previous != null;
@@ -180,7 +187,8 @@ public final class Allocations {
         int depth = 2; // the builder reference and the duplicate the constructor consumes
         for (AbstractInsnNode insn = duplicate.getNext(); insn != null; insn = insn.getNext()) {
             int floor = constructed ? 1 : 2;
-            if (insn instanceof MethodInsnNode call) {
+            if (insn instanceof MethodInsnNode) {
+                MethodInsnNode call = (MethodInsnNode) insn;
                 int popped = callPops(call);
                 int remaining = depth - popped;
                 if (remaining >= floor) {
@@ -211,8 +219,9 @@ public final class Allocations {
                 }
                 return null;
             }
-            int delta = insn instanceof InvokeDynamicInsnNode indy
-                    ? Type.getReturnType(indy.desc).getSize() - argumentSlots(indy.desc)
+            int delta = insn instanceof InvokeDynamicInsnNode
+                    ? Type.getReturnType(((InvokeDynamicInsnNode) insn).desc).getSize()
+                            - argumentSlots(((InvokeDynamicInsnNode) insn).desc)
                     : stackDelta(insn);
             if (delta == UNMODELLED || depth + delta < floor) {
                 return null;

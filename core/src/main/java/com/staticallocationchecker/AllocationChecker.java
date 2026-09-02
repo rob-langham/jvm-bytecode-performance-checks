@@ -63,7 +63,7 @@ public final class AllocationChecker {
      * @return the findings
      */
     public Report analyze(List<Path> analysisRoots, List<Path> resolveClasspath) {
-        return analyze(analysisRoots, resolveClasspath, List.of());
+        return analyze(analysisRoots, resolveClasspath, Collections.emptyList());
     }
 
     /**
@@ -112,7 +112,7 @@ public final class AllocationChecker {
                             Finding.Kind.CONFLICTING_CONTRACTS,
                             Type.getObjectType(classNode.name).getClassName(),
                             method.name, method.desc, -1, null,
-                            List.of(signature(classNode, method))));
+                            Collections.singletonList(signature(classNode, method))));
                 } else if (isWarmup(classNode, method)) {
                     analyzeWarmupMethod(classNode, method, index, findings);
                 } else if (zeroAllocations) {
@@ -218,7 +218,7 @@ public final class AllocationChecker {
             Map<String, ClassNode> index,
             ClassHierarchy hierarchy,
             List<Finding> findings) {
-        walk(owner, entry, List.of(signature(owner, entry)), new HashSet<>(), index, hierarchy, findings);
+        walk(owner, entry, Collections.singletonList(signature(owner, entry)), new HashSet<>(), index, hierarchy, findings);
     }
 
     private void walk(
@@ -235,8 +235,8 @@ public final class AllocationChecker {
         String className = Type.getObjectType(owner.name).getClassName();
         int line = -1;
         for (AbstractInsnNode insn : method.instructions) {
-            if (insn instanceof LineNumberNode lineNode) {
-                line = lineNode.line;
+            if (insn instanceof LineNumberNode) {
+                line = ((LineNumberNode) insn).line;
                 continue;
             }
             AllocationCategory category = siteCategory(insn, index);
@@ -262,8 +262,10 @@ public final class AllocationChecker {
             // StringBuilder chain are skipped too: the chain's allocation is already reported at
             // its NEW, and descending into the JDK from there produces a trail of unanalyzable
             // calls for what the source writes as a single `a + b`.
-            if (category == null && insn instanceof MethodInsnNode call && !call.name.equals("<init>")
-                    && !Allocations.isStringConcatChainMember(call)) {
+            if (category == null && insn instanceof MethodInsnNode
+                    && !((MethodInsnNode) insn).name.equals("<init>")
+                    && !Allocations.isStringConcatChainMember(insn)) {
+                MethodInsnNode call = (MethodInsnNode) insn;
                 // A call site may reach more than one body: the declaration it names, plus every
                 // indexed override reachable by virtual dispatch. All of them are on the hot path.
                 List<ClassHierarchy.MethodRef> targets =
@@ -312,7 +314,7 @@ public final class AllocationChecker {
                     return value;
                 }
             };
-            Analyzer<SourceValue> analyzer = new Analyzer<>(originPreserving) {
+            Analyzer<SourceValue> analyzer = new Analyzer<SourceValue>(originPreserving) {
                 @Override
                 protected void newControlFlowEdge(int from, int to) {
                     successors.computeIfAbsent(from, k -> new ArrayList<>()).add(to);
@@ -329,7 +331,7 @@ public final class AllocationChecker {
                     method.desc,
                     -1,
                     null,
-                    List.of(signature(owner, method))));
+                    Collections.singletonList(signature(owner, method))));
             return;
         }
 
@@ -347,12 +349,12 @@ public final class AllocationChecker {
         }
 
         String className = Type.getObjectType(owner.name).getClassName();
-        List<String> path = List.of(signature(owner, method));
+        List<String> path = Collections.singletonList(signature(owner, method));
         int line = -1;
         for (int i = 0; i < instructions.size(); i++) {
             AbstractInsnNode insn = instructions.get(i);
-            if (insn instanceof LineNumberNode lineNode) {
-                line = lineNode.line;
+            if (insn instanceof LineNumberNode) {
+                line = ((LineNumberNode) insn).line;
                 continue;
             }
             AllocationCategory category = siteCategory(insn, index);
@@ -398,7 +400,8 @@ public final class AllocationChecker {
         // map.put(k, x), pool.offer(x). The receiver being a field read is what distinguishes
         // "stored into the object graph" from "passed to a temporary and dropped".
         if ((opcode == Opcodes.INVOKEVIRTUAL || opcode == Opcodes.INVOKEINTERFACE)
-                && insn instanceof MethodInsnNode call) {
+                && insn instanceof MethodInsnNode) {
+            MethodInsnNode call = (MethodInsnNode) insn;
             int argumentCount = Type.getArgumentTypes(call.desc).length;
             int receiverIndex = frame.getStackSize() - argumentCount - 1;
             if (receiverIndex < 0 || !isReadFromAField(frame.getStack(receiverIndex))) {
@@ -433,7 +436,7 @@ public final class AllocationChecker {
             if (exits.contains(node)) {
                 return true;
             }
-            for (int next : successors.getOrDefault(node, List.of())) {
+            for (int next : successors.getOrDefault(node, Collections.<Integer>emptyList())) {
                 if (next != avoid && seen.add(next)) {
                     queue.add(next);
                 }
@@ -553,7 +556,7 @@ public final class AllocationChecker {
                     continue;
                 }
                 try (InputStream in = jar.getInputStream(entry)) {
-                    ClassNode node = readClass(in.readAllBytes(), archive + "!" + entry.getName());
+                    ClassNode node = readClass(Streams.readAllBytes(in), archive + "!" + entry.getName());
                     index.putIfAbsent(node.name, node);
                 }
             }

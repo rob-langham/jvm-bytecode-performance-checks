@@ -12,11 +12,11 @@
 #   is Gradle's compatibility story, not this library's); jdk-matrix.init.gradle re-points the
 #   test launcher, and the Foojay resolver downloads the matrix JDK inside the container.
 #
-#   8/11 - target legs. The tool needs 17+ to run, but bytecode from these JDKs is supported
-#   input - so the leg compiles an annotated probe with that era's REAL javac (not a modern
-#   javac with --release, whose output can differ in shape) against the core jar, then a 17
-#   container runs the checker over the result and asserts the findings. The 8 leg is also the
-#   proof that an actual Java 8 compiler accepts the annotations.
+#   8/11 - target legs, run ENTIRELY on the target JDK. The leg compiles an annotated probe
+#   with that era's REAL javac (not a modern javac with --release, whose output can differ in
+#   shape) against the core jar, then compiles and runs the checker over the result on that same
+#   JVM and asserts the findings. These legs are the acceptance test for the tool running on
+#   Java 8: they stay red until the runtime side is compiled for release 8.
 #
 # Legs run sequentially against the mounted worktree; suite legs use --rerun-tasks so a later
 # leg cannot ride on an earlier leg's up-to-date outputs. Dependency and toolchain downloads
@@ -57,14 +57,14 @@ target_leg() {
     fi
     local out="build/jdk-matrix/probe$jdk"
     rm -rf "$out" build/jdk-matrix/runner && mkdir -p "$out" build/jdk-matrix/runner
-    echo "-- compiling the probe with a real JDK $jdk javac"
-    in_container "eclipse-temurin:${jdk}-jdk" \
-        javac -cp "$CORE_JAR" -d "$out" scripts/jdk-matrix-probe/Probe.java || return 1
-    echo "-- running the checker (JDK 17) over the JDK $jdk bytecode"
+    echo "-- compiling probe and checker runner, then running the checker, all on JDK $jdk"
     # The agent jar carries the checker with ASM relocated inside, so it is the one artifact
-    # that can run the checker with nothing else on the classpath.
-    in_container "$GRADLE_IMAGE" sh -c \
-        "javac -cp $AGENT_JAR -d build/jdk-matrix/runner scripts/jdk-matrix-probe/RunChecker.java \
+    # that can run the checker with nothing else on the classpath. Everything happens on the
+    # target JDK: compiling RunChecker against the jar is itself part of the test, since javac
+    # rejects any referenced class file newer than its own release.
+    in_container "eclipse-temurin:${jdk}-jdk" sh -c \
+        "javac -cp $CORE_JAR -d $out scripts/jdk-matrix-probe/Probe.java \
+         && javac -cp $AGENT_JAR -d build/jdk-matrix/runner scripts/jdk-matrix-probe/RunChecker.java \
          && java -cp $AGENT_JAR:build/jdk-matrix/runner RunChecker $out"
 }
 

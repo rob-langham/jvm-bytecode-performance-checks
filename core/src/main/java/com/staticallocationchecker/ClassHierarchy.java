@@ -2,6 +2,7 @@ package com.staticallocationchecker;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -71,8 +72,11 @@ final class ClassHierarchy {
 
         @Override
         public boolean equals(Object o) {
-            return o instanceof MethodRef other
-                    && owner.name.equals(other.owner.name)
+            if (!(o instanceof MethodRef)) {
+                return false;
+            }
+            MethodRef other = (MethodRef) o;
+            return owner.name.equals(other.owner.name)
                     && method.name.equals(other.method.name)
                     && method.desc.equals(other.method.desc);
         }
@@ -119,7 +123,7 @@ final class ClassHierarchy {
         if (virtual) {
             targets.addAll(overridesOf(owner, name, descriptor));
         }
-        return List.copyOf(targets);
+        return Collections.unmodifiableList(new ArrayList<>(targets));
     }
 
     /**
@@ -229,11 +233,11 @@ final class ClassHierarchy {
      */
     private Set<String> descendantsOf(String supertype) {
         Set<String> found = new LinkedHashSet<>();
-        Deque<String> pending = new ArrayDeque<>(directSubtypes.getOrDefault(supertype, List.of()));
+        Deque<String> pending = new ArrayDeque<>(directSubtypes.getOrDefault(supertype, Collections.emptyList()));
         while (!pending.isEmpty()) {
             String subtype = pending.poll();
             if (found.add(subtype)) {
-                pending.addAll(directSubtypes.getOrDefault(subtype, List.of()));
+                pending.addAll(directSubtypes.getOrDefault(subtype, Collections.emptyList()));
             }
         }
         return found;

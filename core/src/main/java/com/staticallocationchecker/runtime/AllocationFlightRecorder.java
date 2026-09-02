@@ -1,6 +1,7 @@
 package com.staticallocationchecker.runtime;
 
 import java.lang.management.ManagementFactory;
+import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -98,8 +99,8 @@ public final class AllocationFlightRecorder implements AllocationFlightRecorderM
 
     /** An immutable snapshot of every recorded site. */
     public Map<String, SiteRecord> snapshot() {
-        return sites.entrySet().stream()
-                .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, e -> e.getValue().toRecord()));
+        return Collections.unmodifiableMap(sites.entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().toRecord())));
     }
 
     @Override

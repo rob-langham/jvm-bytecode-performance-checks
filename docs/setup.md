@@ -14,13 +14,20 @@ nav_order: 2
 
 ## Requirements
 
-- **Java 17 or later to run the checker.** The code it checks can be much older: bytecode
-  compiled for Java 8, 11, 17, 21 and 25 is supported — the policy is 8, 11, and then every LTS.
-  The hard ceiling is whatever class-file version the bundled ASM (currently 9.10.1) understands;
-  a class file newer than that fails the build with a message naming both versions and saying the
-  fix is a newer checker, because "failed to parse" would read as corruption and it is not.
-- **Compiling with `--release 8`?** Still fine: the annotations inside the `core` jar are
-  themselves compiled for Java 8, so javac accepts them on the oldest supported compile classpath.
+- **Java 8 or later to run the checker or the agent.** The `core` jar — analyser, classifier,
+  runtime recorder and agent alike — is compiled at `--release 8`, so it runs on a JDK 8 build
+  host and the flight recorder attaches to a legacy JDK 8 production JVM. The code it checks can
+  be just as old or much newer: bytecode compiled for Java 8, 11, 17, 21 and 25 is supported — the
+  policy is 8, 11, and then every LTS. The hard ceiling is whatever class-file version the bundled
+  ASM (currently 9.10.1) understands; a class file newer than that fails the build with a message
+  naming both versions and saying the fix is a newer checker, because "failed to parse" would read
+  as corruption and it is not.
+- **Java 17 or later for the Gradle and Maven plugins.** Only the plugins: they are compiled at
+  17 and so need the *build* to be running on 17 or newer, whatever release that build targets.
+  Driving the checker directly — from the `core` jar, or with the agent — has no such floor.
+- **Compiling with `--release 8`?** Still fine: every class in the `core` jar, annotations
+  included, is Java 8 bytecode, so javac accepts the whole jar on the oldest supported compile
+  classpath.
 - **A build that produces `.class` files.** The checker analyses compiled bytecode, not source. It
   runs after compilation, never instead of it.
 

@@ -109,11 +109,17 @@ public final class WarmupInstrumenter {
 
     /** The synthetic method implementing the lambda an instruction creates, if it is in this class. */
     private static MethodNode lambdaBody(ClassNode classNode, AbstractInsnNode insn) {
-        if (!(insn instanceof InvokeDynamicInsnNode indy)
-                || !LAMBDA_METAFACTORY.equals(indy.bsm.getOwner())
+        if (!(insn instanceof InvokeDynamicInsnNode)) {
+            return null;
+        }
+        InvokeDynamicInsnNode indy = (InvokeDynamicInsnNode) insn;
+        if (!LAMBDA_METAFACTORY.equals(indy.bsm.getOwner())
                 || indy.bsmArgs.length < 2
-                || !(indy.bsmArgs[1] instanceof Handle implementation)
-                || !classNode.name.equals(implementation.getOwner())) {
+                || !(indy.bsmArgs[1] instanceof Handle)) {
+            return null;
+        }
+        Handle implementation = (Handle) indy.bsmArgs[1];
+        if (!classNode.name.equals(implementation.getOwner())) {
             return null;
         }
         for (MethodNode method : classNode.methods) {
@@ -133,8 +139,8 @@ public final class WarmupInstrumenter {
         AbstractInsnNode[] original = method.instructions.toArray();
         for (int offset = 0; offset < original.length; offset++) {
             AbstractInsnNode insn = original[offset];
-            if (insn instanceof LineNumberNode lineNode) {
-                line = lineNode.line;
+            if (insn instanceof LineNumberNode) {
+                line = ((LineNumberNode) insn).line;
                 continue;
             }
             AllocationCategory category = oracle.categoryOf(insn);

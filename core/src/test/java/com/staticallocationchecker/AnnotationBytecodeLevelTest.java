@@ -24,15 +24,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The two annotations must be class-file major 52 (Java 8), even though the rest of the library is
- * compiled at 17.
+ * The two annotations must be class-file major 52 (Java 8).
  *
  * <p>This is not a style preference. A project building with {@code --release 8} cannot have a
  * major-61 class file anywhere on its compile classpath: javac rejects it outright, so the whole
- * jar becomes unusable and the annotations - the only part of this library such a project compiles
+ * jar becomes unusable and the annotations - the part of this library such a project compiles
  * against - cannot be applied at all. That would leave the checker unable to serve exactly the
- * oldest bytecode it claims to support. The release-8 compilation is configured in
- * {@code core/build.gradle.kts}; this test is what stops it being quietly undone.
+ * oldest bytecode it claims to support. The whole of {@code main} is now compiled at release 8,
+ * configured in {@code core/build.gradle.kts}; this test is what stops it being quietly undone.
  */
 class AnnotationBytecodeLevelTest {
 
@@ -102,8 +101,8 @@ class AnnotationBytecodeLevelTest {
                 + JAVA_8_MAJOR
                 + " (Java 8). Projects compiling with --release 8 cannot put a newer class file on"
                 + " their compile classpath, so this makes the annotation - and therefore the whole"
-                + " checker - unusable for the oldest target the tool supports. See the annotations"
-                + " source set in core/build.gradle.kts.";
+                + " checker - unusable for the oldest target the tool supports. See the release-8"
+                + " main compilation in core/build.gradle.kts.";
     }
 
     private static int majorVersionOf(Class<?> type) throws IOException {

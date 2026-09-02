@@ -1,5 +1,7 @@
 package com.staticallocationchecker;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -9,7 +11,7 @@ public final class Report {
     private final List<Finding> findings;
 
     public Report(List<Finding> findings) {
-        this.findings = List.copyOf(findings);
+        this.findings = Collections.unmodifiableList(new ArrayList<>(findings));
     }
 
     public List<Finding> findings() {
@@ -23,7 +25,7 @@ public final class Report {
 
     @Override
     public boolean equals(Object o) {
-        return o instanceof Report other && findings.equals(other.findings);
+        return o instanceof Report && findings.equals(((Report) o).findings);
     }
 
     @Override
