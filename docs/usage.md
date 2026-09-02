@@ -36,8 +36,11 @@ The five kinds:
 | `UNANALYZABLE_CALL` | A call that resolved to nothing in the analysis roots, or a warmup method whose dataflow analysis failed |
 | `CONFLICTING_CONTRACTS` | One method claims both contracts at once — see [where annotations can go](scenarios/annotation-semantics.md#both-annotations-on-one-method) |
 
-The six allocation categories are `NEW`, `NEW_ARRAY`, `BOXING`, `STRING_CONCAT`, `VARARGS_ARRAY`
-and `LAMBDA`. `category` is `null` for the two kinds that are not about a specific allocation.
+The seven allocation categories are `NEW`, `NEW_ARRAY`, `BOXING`, `STRING_CONCAT`,
+`VARARGS_ARRAY`, `RECORD_TO_STRING` and `LAMBDA`. `category` is `null` for the two kinds that are
+not about a specific allocation. `RECORD_TO_STRING` is a record's generated `toString()`, which
+builds a fresh String on every call; the generated `equals` and `hashCode` allocate nothing and
+are not reported.
 
 **`className` is where the allocation is, not where the annotation is.** This trips people up. If
 `OrderBook#onTick` is annotated and the allocation is in `PriceLevels#lookup`, the finding names

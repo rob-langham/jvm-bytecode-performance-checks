@@ -128,6 +128,21 @@ class AllocationsTest {
     }
 
     @Test
+    void classifiesARecordsGeneratedToStringAsAnAllocation() {
+        assertEquals(AllocationCategory.RECORD_TO_STRING, categoryOf(indy(
+                "java/lang/runtime/ObjectMethods", "toString", "(Lcom/example/Point;)Ljava/lang/String;")),
+                "a record's toString builds a fresh String on every call");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"equals", "hashCode"})
+    void exemptsARecordsOtherGeneratedMembers(String name) {
+        assertNull(categoryOf(indy(
+                        "java/lang/runtime/ObjectMethods", name, "(Lcom/example/Point;)Z")),
+                "equals and hashCode share toString's bootstrap but allocate nothing");
+    }
+
+    @Test
     void ignoresIndyFromAnUnknownBootstrap() {
         assertNull(categoryOf(indy("com/example/CustomFactory", "()Ljava/lang/Object;")));
     }
@@ -214,11 +229,15 @@ class AllocationsTest {
     }
 
     private static InvokeDynamicInsnNode indy(String bootstrapOwner, String descriptor) {
+        return indy(bootstrapOwner, "run", descriptor);
+    }
+
+    private static InvokeDynamicInsnNode indy(String bootstrapOwner, String name, String descriptor) {
         Handle bootstrap = new Handle(
                 Opcodes.H_INVOKESTATIC, bootstrapOwner, "bootstrap",
                 "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;"
                         + "Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;",
                 false);
-        return new InvokeDynamicInsnNode("run", descriptor, bootstrap);
+        return new InvokeDynamicInsnNode(name, descriptor, bootstrap);
     }
 }

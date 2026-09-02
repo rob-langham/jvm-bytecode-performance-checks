@@ -9,7 +9,8 @@ A static analyser for JVM bytecode that enforces allocation contracts on hot pat
 method as zero-allocation, and the checker walks its bytecode — and everything it calls
 transitively — failing the build on any heap allocation it finds.
 
-Built on [ASM](https://asm.ow2.io/). Requires Java 17+.
+Built on [ASM](https://asm.ow2.io/). Runs on Java 17+ and analyses bytecode compiled for
+Java 8, 11, 17, 21 or 25.
 
 ---
 

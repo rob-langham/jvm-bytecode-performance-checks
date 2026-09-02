@@ -123,6 +123,48 @@ class StaticAllocationCheckerPluginTest {
         assertTrue(thrown.getMessage().contains("no classes directories"), thrown.getMessage());
     }
 
+    @Test
+    void surfacesUnreadableBytecodeAsABuildFailureNotAnInternalError(@TempDir Path dir)
+            throws IOException {
+        // Far beyond any ASM's ceiling, so this stays a "too new" class file rather than becoming
+        // a supported version the day someone bumps the ASM pin.
+        StaticAllocationCheckerTask task = taskWithClassStampedAs(dir, 99);
+
+        GradleException thrown = assertThrows(GradleException.class, task::check,
+                "a parse failure must be a build failure, not a raw IllegalStateException"
+                        + " with the guidance buried in a stack trace");
+
+        assertTrue(thrown.getMessage().contains("could not analyse"), thrown.getMessage());
+        assertTrue(thrown.getMessage().contains("major version 99"),
+                "the checker's own explanation must reach the user: " + thrown.getMessage());
+        assertNotNull(thrown.getCause(), "the original failure has to stay attached for --stacktrace");
+    }
+
+    @Test
+    void surfacesCorruptBytecodeAsABuildFailure(@TempDir Path dir) throws IOException {
+        Project project = projectWith(dir);
+        Path classes = dir.resolve("classes");
+        Files.createDirectories(classes);
+        Files.write(classes.resolve("Corrupt.class"), new byte[] {1, 2, 3, 4});
+        StaticAllocationCheckerTask task = taskIn(project);
+        task.getClassesDirs().setFrom(classes.toFile());
+
+        GradleException thrown = assertThrows(GradleException.class, task::check);
+
+        assertTrue(thrown.getMessage().contains("could not analyse"), thrown.getMessage());
+    }
+
+    private StaticAllocationCheckerTask taskWithClassStampedAs(Path dir, int major)
+            throws IOException {
+        StaticAllocationCheckerTask task = taskWithAllocatingClass(dir);
+        Path target = dir.resolve("classes/com/staticallocationchecker/fixtures/DirectNew.class");
+        byte[] bytes = Files.readAllBytes(target);
+        bytes[6] = (byte) (major >>> 8);
+        bytes[7] = (byte) major;
+        Files.write(target, bytes);
+        return task;
+    }
+
     private StaticAllocationCheckerTask taskWithAllocatingClass(Path dir) throws IOException {
         Project project = projectWith(dir);
         Path classes = dir.resolve("classes");
