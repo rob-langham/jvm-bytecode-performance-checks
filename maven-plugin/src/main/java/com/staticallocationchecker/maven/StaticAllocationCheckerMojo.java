@@ -45,6 +45,20 @@ public class StaticAllocationCheckerMojo extends AbstractMojo {
     @Parameter
     private List<File> resolveClasspath;
 
+    /**
+     * The Java release the analysed code will run on, used to resolve multi-release jars (JEP 238)
+     * the way the running JVM will.
+     *
+     * <p>Defaults to {@code ${maven.compiler.release}}, which is where a Maven build already states
+     * which JVM it builds for. Left absent - the property unset, as it is in a build that still
+     * uses {@code maven.compiler.source}/{@code target} - only the base entries of a multi-release
+     * jar are read, which is what this goal did before the parameter existed. Set it explicitly
+     * when the deployment JVM is newer than the compile target.
+     */
+    @Parameter(property = "static-allocation-checker.targetRelease",
+            defaultValue = "${maven.compiler.release}")
+    private String targetRelease;
+
     @Override
     public void execute() throws MojoFailureException, MojoExecutionException {
         if (skip) {
@@ -54,7 +68,8 @@ public class StaticAllocationCheckerMojo extends AbstractMojo {
 
         Report report;
         try {
-            report = new AllocationChecker().analyze(roots(), paths(resolveClasspath));
+            report = new AllocationChecker(targetRelease())
+                    .analyze(roots(), paths(resolveClasspath));
         } catch (RuntimeException e) {
             // The checker throws unchecked when it cannot read what it was pointed at. Surfacing
             // that as an internal stack trace helps nobody; Maven has a word for "the plugin could
@@ -75,6 +90,26 @@ public class StaticAllocationCheckerMojo extends AbstractMojo {
             return;
         }
         throw new MojoFailureException(summary);
+    }
+
+    /**
+     * The configured release, or 0 for "base entries only".
+     *
+     * <p>Absent and empty both mean unset: {@code ${maven.compiler.release}} resolves to an empty
+     * string in a build that never defined the property. Anything else that is not a release number
+     * is a configuration mistake and is reported as one - quietly falling back to base-only would
+     * analyse a different jar than the user asked for and still say the build was checked.
+     */
+    private int targetRelease() throws MojoExecutionException {
+        if (targetRelease == null || targetRelease.trim().isEmpty()) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(targetRelease.trim());
+        } catch (NumberFormatException e) {
+            throw new MojoExecutionException("static-allocation-checker: targetRelease must be a "
+                    + "Java release number such as 8, 17 or 21, but was: " + targetRelease, e);
+        }
     }
 
     private List<Path> roots() throws MojoExecutionException {

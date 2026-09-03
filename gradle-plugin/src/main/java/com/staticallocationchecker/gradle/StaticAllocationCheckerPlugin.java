@@ -4,7 +4,9 @@ import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.plugins.JavaPlugin;
 import org.gradle.api.plugins.JavaPluginExtension;
+import org.gradle.api.provider.Provider;
 import org.gradle.api.tasks.SourceSet;
+import org.gradle.api.tasks.compile.JavaCompile;
 import org.gradle.api.tasks.TaskProvider;
 import org.gradle.language.base.plugins.LifecycleBasePlugin;
 
@@ -28,14 +30,32 @@ public class StaticAllocationCheckerPlugin implements Plugin<Project> {
                 });
 
         project.getPlugins().withType(JavaPlugin.class, javaPlugin -> {
-            SourceSet main = project.getExtensions().getByType(JavaPluginExtension.class)
-                    .getSourceSets().getByName(SourceSet.MAIN_SOURCE_SET_NAME);
+            JavaPluginExtension java = project.getExtensions().getByType(JavaPluginExtension.class);
+            SourceSet main = java.getSourceSets().getByName(SourceSet.MAIN_SOURCE_SET_NAME);
             checkTask.configure(task -> {
                 task.getClassesDirs().convention(main.getOutput().getClassesDirs());
+                task.getTargetRelease().convention(compileTargetOf(project, java, main));
                 task.dependsOn(main.getClassesTaskName());
             });
             project.getTasks().named(LifecycleBasePlugin.CHECK_TASK_NAME)
                     .configure(check -> check.dependsOn(checkTask));
         });
+    }
+
+    /**
+     * The release this project compiles for, as the convention for {@code targetRelease}.
+     *
+     * <p>{@code options.release} first, because when it is set it is the definitive statement of
+     * the target; the java extension's target compatibility second, which is where a toolchain's
+     * language version ends up when nothing more specific was said. Both are read lazily - a
+     * buildscript that configures either after the plugin is applied still wins.
+     */
+    private static Provider<Integer> compileTargetOf(
+            Project project, JavaPluginExtension java, SourceSet main) {
+        Provider<Integer> declaredRelease = project.getTasks()
+                .named(main.getCompileJavaTaskName(), JavaCompile.class)
+                .flatMap(compile -> compile.getOptions().getRelease());
+        return declaredRelease.orElse(project.provider(
+                () -> Integer.valueOf(java.getTargetCompatibility().getMajorVersion())));
     }
 }

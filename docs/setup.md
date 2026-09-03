@@ -128,6 +128,10 @@ tasks.named<StaticAllocationCheckerTask>("checkStaticAllocation") {
     // Accepted and passed through; the analyser does not use it to widen resolution yet.
     resolveClasspath.from(configurations.runtimeClasspath)
 
+    // The release the code will run on, for resolving multi-release jars. Defaults to the
+    // project's own compile target; set it only when the deployment JVM is newer than that.
+    targetRelease.set(21)
+
     // Report findings without failing — for adopting this on an existing codebase.
     ignoreFailures.set(true)
 
@@ -170,6 +174,10 @@ It takes parameters:
   <resolveClasspath>
     <resolveClasspath>${project.basedir}/../shared-domain/target/classes</resolveClasspath>
   </resolveClasspath>
+
+  <!-- The release the code will run on, for resolving multi-release jars. Defaults to
+       ${maven.compiler.release}. -->
+  <targetRelease>21</targetRelease>
 
   <!-- Report without failing, for adoption on an existing codebase. -->
   <ignoreFailures>false</ignoreFailures>
@@ -234,6 +242,47 @@ path, so name methods when you mean methods.
 > An entry point that matches nothing is an error, not an empty result. A typo in a class name would
 > otherwise produce a clean report for code that was never looked at — which looks exactly like
 > success.
+
+### Multi-release jars (JEP 238)
+
+A multi-release jar carries the same class more than once: a base copy at the root, and a copy under
+`META-INF/versions/N/` for JVMs at release `N` or above. The copies are not equivalent — the
+versioned one exists precisely because it does something differently, which may well be allocating
+differently.
+
+So the checker has to be told which JVM the code runs on, and **the default is base entries only**.
+That is what a Java 8 JVM loads, it is the conservative reading, and it is what every release before
+this option existed did. On a modern JVM it is the wrong reading, and the way it is wrong is the
+dangerous direction: an allocation that exists only in the versioned copy goes unreported.
+
+Set the release, and the versioned entries come into view — the highest `META-INF/versions/N/` copy
+with `N` at or below the target wins, anything above it is ignored, and a jar without
+`Multi-Release: true` in its manifest has no versioned entries at all, exactly as the JVM sees it.
+Directories are never multi-release, so nothing changes for your own compiled output.
+
+```kotlin
+// Gradle: conventionally the project's own compile target, so usually nothing to do.
+tasks.named<StaticAllocationCheckerTask>("checkStaticAllocation") {
+    targetRelease.set(21)
+}
+```
+
+```xml
+<!-- Maven: defaults to ${maven.compiler.release}. -->
+<configuration>
+  <targetRelease>21</targetRelease>
+</configuration>
+```
+
+```java
+// Directly: a constructor argument. No argument means base entries only.
+Report report = new AllocationChecker(21).analyze(roots, resolveClasspath);
+```
+
+The convention in both plugins is the release the project *compiles* for, because that is where
+"which JVM is this built for" already lives. Override it when the two differ — an application
+compiled at release 8 for compatibility but deployed on a 21 JVM should set `21`, because 21 is the
+release whose versioned entries will actually be loaded.
 
 {: .warning }
 > Giving the checker too few roots does not make it quieter — it makes it noisier. Every call it

@@ -121,8 +121,44 @@ val crossReleaseRecordFixtureTasks =
     registerCrossReleaseCompilation(
         "CrossReleaseRecord", "src/crossReleaseFixtures/java17", recordCapableLevels)
 
+// ---------------------------------------------------------------------------------------------
+// A genuine multi-release jar, assembled by the build.
+//
+// The in-test jars in MultiReleaseJarTest are assembled by hand, which proves the selection rules
+// but not that a jar a real build produces is laid out the way those rules assume. So one fixture
+// class is compiled twice - the base copy at release 8, the versioned copy at 17 - and packaged by
+// an ordinary Gradle `Jar` task with the `Multi-Release` manifest attribute, exactly as a library
+// shipping an MRJAR would do it.
+//
+// It earns a second keep: MultiReleaseFixtureJarSanityTest opens this same jar with the JDK's own
+// versioned JarFile machinery (test code runs on 17, so Java 9+ API is fair game there, unlike in
+// main) and checks the JVM resolves the variant the checker analysed. That anchors the hand-rolled
+// implementation to the platform's, on every JDK in the CI matrix.
+// ---------------------------------------------------------------------------------------------
+val mrjarBaseFixtureTasks =
+    registerCrossReleaseCompilation("MrjarBase", "src/mrjarFixtures/java", listOf(8))
+val mrjarVersionedFixtureTasks =
+    registerCrossReleaseCompilation("MrjarVersioned", "src/mrjarFixtures/java17", listOf(17))
+
+val mrjarFixtureJar = tasks.register<Jar>("mrjarFixtureJar") {
+    group = "build"
+    description = "Packages the multi-release fixture: base classes at the root, release-17 " +
+        "classes under META-INF/versions/17."
+    archiveFileName = "mrjar-fixture.jar"
+    destinationDirectory = layout.buildDirectory.dir("mrjarFixtures")
+    manifest {
+        // Without this attribute the versioned entries are inert - to the JVM and to the checker.
+        attributes("Multi-Release" to "true")
+    }
+    from(mrjarBaseFixtureTasks.getValue(8).map { it.destinationDirectory })
+    from(mrjarVersionedFixtureTasks.getValue(17).map { it.destinationDirectory }) {
+        into("META-INF/versions/17")
+    }
+}
+
 tasks.test {
     dependsOn(crossReleaseFixtureTasks.values, crossReleaseRecordFixtureTasks.values)
+    dependsOn(mrjarFixtureJar)
     // The compiled fixtures are an input to the test itself, not just something it happens to
     // depend on: the assertions are about their bytecode, so a change to them must invalidate the
     // test's result.
@@ -132,6 +168,9 @@ tasks.test {
     inputs.files(
         crossReleaseRecordFixtureTasks.values.map { it.map { task -> task.destinationDirectory } })
         .withPropertyName("crossReleaseRecordFixtureClasses")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files(mrjarFixtureJar)
+        .withPropertyName("mrjarFixtureJar")
         .withPathSensitivity(PathSensitivity.RELATIVE)
 
     // Handed over as one system property per level, following the fixtureClasses/agentJar pattern
@@ -143,7 +182,15 @@ tasks.test {
         } + crossReleaseRecordFixtureTasks.map { (level, task) ->
             "-DcrossReleaseRecordFixtures.$level=" +
                 task.get().destinationDirectory.get().asFile.absolutePath
-        }
+        } + listOf(
+            "-DmrjarFixtureJar=" +
+                mrjarFixtureJar.get().archiveFile.get().asFile.absolutePath,
+            "-DmrjarFixtureClasses.8=" +
+                mrjarBaseFixtureTasks.getValue(8).get().destinationDirectory.get().asFile.absolutePath,
+            "-DmrjarFixtureClasses.17=" +
+                mrjarVersionedFixtureTasks.getValue(17).get().destinationDirectory.get()
+                    .asFile.absolutePath,
+        )
     })
 }
 

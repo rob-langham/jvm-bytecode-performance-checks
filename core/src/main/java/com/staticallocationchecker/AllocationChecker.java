@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
-import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -50,6 +49,38 @@ public final class AllocationChecker {
 
     /** Keyed by identity: each analyse run builds one index and wants one oracle for it. */
     private final Map<Map<String, ClassNode>, TypeOracle> oracles = new IdentityHashMap<>();
+
+    private final int targetRelease;
+
+    /**
+     * A checker that reads only the base entries of any multi-release jar it is pointed at.
+     *
+     * <p>That is the conservative default rather than the right answer for everybody: it is what
+     * this checker has always done, and it matches a JVM at release 8. Say which release the code
+     * will run on - {@link #AllocationChecker(int)} - and the versioned entries come into view.
+     */
+    public AllocationChecker() {
+        this(0);
+    }
+
+    /**
+     * A checker that resolves multi-release jars (JEP 238) as a JVM at the given release would.
+     *
+     * <p>A dependency shipped as a multi-release jar carries the same class twice or more, and the
+     * copies are not equivalent - the modern one exists precisely because it does something
+     * differently. Analysing whichever copy happened to be indexed first would report on code the
+     * application never runs, so the release the application runs on is part of the question.
+     *
+     * @param targetRelease the Java release the analysed code will run on, as a plain feature
+     *                      number ({@code 8}, {@code 17}, {@code 21}). {@code 0} - or any value
+     *                      below 9 - means base entries only, which is the no-argument
+     *                      constructor's behaviour and the behaviour of every release before this
+     *                      parameter existed. Directories are unaffected either way: only jars can
+     *                      be multi-release.
+     */
+    public AllocationChecker(int targetRelease) {
+        this.targetRelease = targetRelease;
+    }
 
     /**
      * Analyses the given roots.
@@ -547,14 +578,13 @@ public final class AllocationChecker {
     /**
      * Indexes the classes inside a jar. Silently indexing nothing here would mean reporting a clean
      * bill of health for code that was never read, so anything unreadable fails loudly instead.
+     *
+     * <p>Which entry a class comes from is {@link MultiReleaseJar}'s decision: a multi-release jar
+     * holds several copies of one class, and only one of them is the copy that runs.
      */
     private void indexArchive(Path archive, Map<String, ClassNode> index) {
         try (JarFile jar = new JarFile(archive.toFile())) {
-            for (Enumeration<JarEntry> entries = jar.entries(); entries.hasMoreElements();) {
-                JarEntry entry = entries.nextElement();
-                if (entry.isDirectory() || !entry.getName().endsWith(".class")) {
-                    continue;
-                }
+            for (JarEntry entry : MultiReleaseJar.classEntries(jar, targetRelease).values()) {
                 try (InputStream in = jar.getInputStream(entry)) {
                     ClassNode node = readClass(Streams.readAllBytes(in), archive + "!" + entry.getName());
                     index.putIfAbsent(node.name, node);
