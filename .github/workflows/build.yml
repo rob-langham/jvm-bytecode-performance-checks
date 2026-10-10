@@ -38,10 +38,10 @@ jobs:
         # after it, and for a bytecode tool "works on a newer JVM" is a real risk rather than a
         # theoretical one - 25 in particular is where class-file major 69 shows up.
         #
-        # Gradle itself always runs on 17: Gradle 8.11 cannot run on Java 25 at all, and which
-        # JVMs Gradle runs on is Gradle's compatibility story, not this library's. Both JDKs are
-        # installed below - the matrix one first, 17 last so it wins JAVA_HOME - and the toolchain
-        # machinery finds the matrix JDK by auto-detection.
+        # Gradle itself always runs on 17 - the floor Gradle 9 needs - so every leg runs the same
+        # Gradle on the same JVM; which JVMs Gradle runs on is Gradle's compatibility story, not
+        # this library's. Both JDKs are installed below - the matrix one first, 17 last so it wins
+        # JAVA_HOME - and the toolchain machinery finds the matrix JDK by auto-detection.
         java: ['17', '21', '25']
     steps:
       - uses: actions/checkout@v4

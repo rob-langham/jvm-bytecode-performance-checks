@@ -1,6 +1,6 @@
 plugins {
     `java-library`
-    id("com.gradleup.shadow") version "8.3.5"
+    id("com.gradleup.shadow") version "9.6.1"
 }
 
 // 9.7.1 refused class-file major 69, so anything compiled by a Java 25 javac was unreadable.
@@ -39,13 +39,13 @@ tasks.withType<Javadoc>().configureEach {
 
 // The agent can only really be tested by launching a JVM with -javaagent, which needs the built
 // jar. That is a different dependency shape from the unit tests, so it gets its own source set.
-val agentTest: SourceSet by sourceSets.creating
+val agentTest: SourceSet = sourceSets.create("agentTest")
 
 configurations["agentTestImplementation"].extendsFrom(configurations["testImplementation"])
 configurations["agentTestRuntimeOnly"].extendsFrom(configurations["testRuntimeOnly"])
 
 dependencies {
-    "agentTestImplementation"(project)
+    "agentTestImplementation"(project(project.path))
 }
 
 val agentTestTask = tasks.register<Test>("agentTest") {
@@ -207,6 +207,12 @@ tasks.test {
 val shadedAsmPackage = "com.staticallocationchecker.shaded.asm"
 
 tasks.shadowJar {
+    // Shadow 9 builds this task's manifest as a view over the plain jar's own Manifest object, so
+    // the agent attributes below would be written into the library jar as well - depending only on
+    // which task happened to be configured first. Handing the plain jar a fresh manifest after
+    // Shadow has captured the old one keeps the two apart: the agent jar keeps the attributes, the
+    // library jar stays free of entry points it cannot honour.
+    tasks.jar.get().manifest = java.manifest()
     archiveClassifier.set("agent")
     relocate("org.objectweb.asm", shadedAsmPackage)
     manifest {

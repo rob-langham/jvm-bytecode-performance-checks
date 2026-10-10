@@ -1,6 +1,8 @@
 plugins {
     java
-    id("de.benediktritter.maven-plugin-development") version "0.4.3"
+    // The de.benediktritter plugin's successor under GradleX. 0.4.3 called
+    // ProjectDependency.getDependencyProject(), which Gradle 9 removed; same DSL and task names.
+    id("org.gradlex.maven-plugin-development") version "1.0.3"
 }
 
 val mavenApiVersion = "3.9.9"

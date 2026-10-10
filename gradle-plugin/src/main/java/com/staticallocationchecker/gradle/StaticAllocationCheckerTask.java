@@ -22,6 +22,7 @@ import org.gradle.api.tasks.OutputFile;
 import org.gradle.api.tasks.PathSensitive;
 import org.gradle.api.tasks.PathSensitivity;
 import org.gradle.api.tasks.TaskAction;
+import org.gradle.work.DisableCachingByDefault;
 
 /**
  * Task that runs the {@link AllocationChecker} over the project's compiled classes.
@@ -31,6 +32,10 @@ import org.gradle.api.tasks.TaskAction;
  * an empty analysis: reporting a clean bill of health for code that was never read is the failure
  * this tool exists to prevent.
  */
+// Up-to-date checking is what the declared inputs and outputs are for; the build cache is not
+// worth it - the analysis is cheap next to the compile that produced its input - and Gradle 9's
+// plugin validation requires that choice to be stated rather than left implicit.
+@DisableCachingByDefault(because = "Analysis is cheap relative to compilation; not worth caching")
 public abstract class StaticAllocationCheckerTask extends DefaultTask {
 
     /** The compiled classes to analyse. Defaults to the main source set's output. */

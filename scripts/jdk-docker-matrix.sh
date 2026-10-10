@@ -8,8 +8,8 @@
 # Two kinds of leg, matching what each JDK can actually do:
 #
 #   17/21/25 - suite legs. The full build runs with the tests executing on that JVM. Gradle
-#   itself always runs on 17 (Gradle 8.11 cannot run on Java 25, and which JVMs Gradle runs on
-#   is Gradle's compatibility story, not this library's); jdk-matrix.init.gradle re-points the
+#   itself always runs on 17 (the floor Gradle 9 needs, and which JVMs Gradle runs on is
+#   Gradle's compatibility story, not this library's); jdk-matrix.init.gradle re-points the
 #   test launcher, and the Foojay resolver downloads the matrix JDK inside the container.
 #
 #   8/11 - target legs, run ENTIRELY on the target JDK. The leg compiles an annotated probe

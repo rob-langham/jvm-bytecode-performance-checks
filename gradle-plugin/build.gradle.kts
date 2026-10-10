@@ -5,7 +5,7 @@ plugins {
     // to both: the portal for `plugins { id(...) }` resolution, Central for anyone resolving it
     // as an ordinary dependency.
     id("com.gradle.plugin-publish") version "1.3.0"
-    id("com.gradleup.shadow") version "8.3.5"
+    id("com.gradleup.shadow") version "9.6.1"
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -22,7 +22,7 @@ plugins {
 // runtime dependency, or the published POM would tell consumers to resolve the very artifacts the
 // jar already contains - and Gradle would put an unrelocated ASM back on the classpath beside the
 // relocated one.
-val bundled: Configuration by configurations.creating
+val bundled: Configuration = configurations.create("bundled")
 
 dependencies {
     bundled(project(":core"))
