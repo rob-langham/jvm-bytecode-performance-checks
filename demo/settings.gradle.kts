@@ -21,7 +21,7 @@ includeBuild("..")
 // building the library on a newer JDK would stop them running the demos. Gradle downloads 17
 // rather than failing with "No locally installed toolchains match".
 plugins {
-    id("org.gradle.toolchains.foojay-resolver-convention") version "0.9.0"
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
 rootProject.name = "static-allocation-checker-demos"

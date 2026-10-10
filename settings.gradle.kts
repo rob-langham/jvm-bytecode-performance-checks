@@ -4,7 +4,7 @@
 // 17 instead, so `./gradlew build` works on whatever JDK a contributor - or a CI matrix job -
 // happens to be running.
 plugins {
-    id("org.gradle.toolchains.foojay-resolver-convention") version "0.9.0"
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
 rootProject.name = "static-allocation-checker"
