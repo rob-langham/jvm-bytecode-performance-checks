@@ -88,7 +88,7 @@ class JavaAgentEndToEndTest {
         }
         assertEquals(1, warmCodes.size(), () -> "expected one warm() site: " + keys);
         List<Integer> warmEvents = new ArrayList<>();
-        AllocationTraceReader.forEachEvent(dir, (code, nanos) -> {
+        AllocationTraceReader.forEachEvent(dir, (code, millis) -> {
             if (warmCodes.contains(code)) {
                 warmEvents.add(code);
             }

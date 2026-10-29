@@ -18,12 +18,12 @@ The first 0.1 seconds are warm-up. Abridged from one run:
 
 ```
 By contract:
-  warmup          sites    2  warm-up events        529  steady events       2472  still allocating 1  violations 0
-  unannotated     sites    5  warm-up events          5  steady events         15  still allocating 0  violations 0
+  warmup          sites    2  warm-up events        378  steady events       2623  still allocating 1  violations 0
+  unannotated     sites    5  warm-up events          2  steady events         18  still allocating 0  violations 0
 
 code       count    warm-up     steady     first ms      last ms  contract        state             site
-5              1          1          0        5.549        5.549  warmup          steady            demo.runtime.PricingEngine#levels
-6           3000        528       2472        5.571      181.804  warmup          STILL ALLOCATING  demo.runtime.ResizingCache#scratch
+5              1          1          0            2            2  warmup          steady            demo.runtime.PricingEngine#levels
+6           3000        377       2623            2          166  warmup          STILL ALLOCATING  demo.runtime.ResizingCache#scratch
 ```
 
 `PricingEngine#levels` allocates once, during warm-up, and never again through thirty million
@@ -42,8 +42,7 @@ bug the checker structurally cannot find.
 ## How the agent is wired
 
 The agent records every allocation site in the application at class-load time. Each allocation
-writes a 12-byte record to `allocations.bin` in the trace directory: a site code, then a nanosecond
-timestamp. `allocations.keys` maps each code to the site it stands for. The agent does no analysis;
+writes a 12-byte record to `allocations.bin` in the trace directory: a site code, then a timestamp in milliseconds. `allocations.keys` maps each code to the site it stands for. The agent does no analysis;
 it stays out of the way of the JIT.
 
 The report reads both files, and reads this build's classes for the `@AllocationsForWarmup` and

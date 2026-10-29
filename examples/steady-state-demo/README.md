@@ -29,15 +29,15 @@ java -cp $AGENT com.staticallocationchecker.trace.TraceReport build/trace build/
 Abridged, from one run:
 
 ```
-Warm-up: ends 442.409 ms into the run. Only allocations after that are steady state.
+Warm-up: ends 425 ms into the run. Only allocations after that are steady state.
 
 By contract:
-  warmup          sites    2  warm-up events         49  steady events         64  still allocating 1  violations 0
-  unannotated     sites   12  warm-up events         33  steady events        100  still allocating 0  violations 0
+  warmup          sites    2  warm-up events         33  steady events         88  still allocating 1  violations 0
+  unannotated     sites   12  warm-up events         17  steady events        116  still allocating 0  violations 0
 
 code       count    warm-up     steady     first ms      last ms  contract        state             site
-12             1          1          0        4.949        4.949  warmup          steady            demo.PricingEngine#levels
-13           112         48         64        5.013     2902.758  warmup          STILL ALLOCATING  demo.ResizingCache#scratch
+12             1          1          0            6            6  warmup          steady            demo.PricingEngine#levels
+13           120         32         88            6         3361  warmup          STILL ALLOCATING  demo.ResizingCache#scratch
 ```
 
 `PricingEngine#levels` allocates during warm-up and never again. `ResizingCache#scratch` is still

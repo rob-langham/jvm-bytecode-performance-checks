@@ -306,9 +306,9 @@ allocation to two files in the trace directory:
 
 | File | Contents |
 | --- | --- |
-| `allocations.bin` | One 12-byte record per allocation: a 4-byte site code, then an 8-byte timestamp in nanoseconds |
+| `allocations.bin` | One 12-byte record per allocation: a 4-byte site code, then an 8-byte timestamp in milliseconds since the Unix epoch |
 | `allocations.keys` | One `code<TAB>site` line per site, where the site is `class#method:line@offset:CATEGORY` |
-| `warmup.txt` | The nanoTime at which the warm-up period ends |
+| `warmup.txt` | The Unix epoch milliseconds at which the warm-up period ends |
 
 The options are `dir=`, where the trace goes (default `allocation-trace` in the working directory), and
 `warmup=`, the warm-up period in seconds from when the agent starts (default `0`). Allocations during

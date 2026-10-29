@@ -21,7 +21,7 @@ public final class AllocationTraceReader {
     /** Receives events in file order. */
     @FunctionalInterface
     public interface EventVisitor {
-        void event(int code, long nanos);
+        void event(int code, long millis);
     }
 
     private static final int BUFFER_BYTES = AllocationTrace.RECORD_BYTES * 8192;
@@ -48,7 +48,7 @@ public final class AllocationTraceReader {
     }
 
     /**
-     * The nanoTime at which the warm-up period ended, or empty if the trace has no warm-up file (a trace
+     * The Unix epoch milliseconds at which the warm-up period ended, or empty if the trace has no warm-up file (a trace
      * written by something other than {@link AllocationTrace}, or an older one).
      */
     public static OptionalLong warmupEnd(Path directory) throws IOException {
@@ -57,8 +57,8 @@ public final class AllocationTraceReader {
             return OptionalLong.empty();
         }
         for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
-            if (line.startsWith("endNanos=")) {
-                return OptionalLong.of(Long.parseLong(line.substring("endNanos=".length()).trim()));
+            if (line.startsWith("endMillis=")) {
+                return OptionalLong.of(Long.parseLong(line.substring("endMillis=".length()).trim()));
             }
         }
         return OptionalLong.empty();

@@ -85,9 +85,9 @@ public final class TraceReport {
 
         Map<Integer, Tally> tallies = new TreeMap<>();
         Tally run = new Tally();
-        AllocationTraceReader.forEachEvent(traceDirectory, (code, nanos) -> {
-            tallies.computeIfAbsent(code, c -> new Tally()).add(nanos, boundary);
-            run.add(nanos, boundary);
+        AllocationTraceReader.forEachEvent(traceDirectory, (code, millis) -> {
+            tallies.computeIfAbsent(code, c -> new Tally()).add(millis, boundary);
+            run.add(millis, boundary);
         });
 
         StringBuilder out = new StringBuilder();
@@ -97,11 +97,11 @@ public final class TraceReport {
             return out.toString();
         }
 
-        out.append(String.format("Events: %d over %.3f ms, from %d site(s)%n",
-                run.count, (run.last - run.first) / 1e6, tallies.size()));
+        out.append(String.format("Events: %d over %d ms, from %d site(s)%n",
+                run.count, run.last - run.first, tallies.size()));
         if (warmupEnd.isPresent() && warmupEnd.getAsLong() > run.first) {
-            out.append(String.format("Warm-up: ends %.3f ms into the run. Only allocations after that are steady state.%n%n",
-                    (warmupEnd.getAsLong() - run.first) / 1e6));
+            out.append(String.format("Warm-up: ends %d ms into the run. Only allocations after that are steady state.%n%n",
+                    warmupEnd.getAsLong() - run.first));
         } else if (warmupEnd.isPresent()) {
             out.append("Warm-up had already ended before the first allocation: every event is steady state.\n\n");
         } else {
@@ -133,9 +133,9 @@ public final class TraceReport {
                 violations.merge(contract, 1, Integer::sum);
             }
 
-            rows.append(String.format("%-5d %10d %10d %10d %12.3f %12.3f  %-15s %-17s %s%n",
+            rows.append(String.format("%-5d %10d %10d %10d %12d %12d  %-15s %-17s %s%n",
                     code, tally.count, tally.warmup, tally.steady,
-                    (tally.first - run.first) / 1e6, (tally.last - run.first) / 1e6,
+                    tally.first - run.first, tally.last - run.first,
                     contract.label, state, key == null ? "?" : shortName(key)));
 
             if (key == null) {
@@ -196,15 +196,15 @@ public final class TraceReport {
         long first = Long.MAX_VALUE;
         long last = Long.MIN_VALUE;
 
-        void add(long nanos, long boundary) {
+        void add(long millis, long boundary) {
             count++;
-            if (nanos < boundary) {
+            if (millis < boundary) {
                 warmup++;
             } else {
                 steady++;
             }
-            first = Math.min(first, nanos);
-            last = Math.max(last, nanos);
+            first = Math.min(first, millis);
+            last = Math.max(last, millis);
         }
     }
 

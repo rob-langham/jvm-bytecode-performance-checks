@@ -21,7 +21,7 @@ class AllocationTraceTest {
     private static List<long[]> readEvents(Path dir) throws IOException {
         List<long[]> events = new ArrayList<>();
         AllocationTraceReader.forEachEvent(dir,
-                (code, nanos) -> events.add(new long[] {code, nanos}));
+                (code, millis) -> events.add(new long[] {code, millis}));
         return events;
     }
 
@@ -62,10 +62,10 @@ class AllocationTraceTest {
 
     @Test
     void theWarmUpBoundaryIsWrittenWhenTheTraceOpens() throws IOException {
-        AllocationTrace trace = AllocationTrace.open(dir, 2_000_000_000L, () -> 1_000L);
+        AllocationTrace trace = AllocationTrace.open(dir, 2_000L, () -> 1_000L);
         trace.close();
 
-        assertEquals(java.util.OptionalLong.of(2_000_001_000L), AllocationTraceReader.warmupEnd(dir),
+        assertEquals(java.util.OptionalLong.of(3_000L), AllocationTraceReader.warmupEnd(dir),
                 "the boundary is the clock at open plus the warm-up");
     }
 
@@ -111,7 +111,7 @@ class AllocationTraceTest {
         trace.close();
 
         long[] perCode = new long[threads];
-        AllocationTraceReader.forEachEvent(dir, (code, nanos) -> perCode[code]++);
+        AllocationTraceReader.forEachEvent(dir, (code, millis) -> perCode[code]++);
         for (long count : perCode) {
             assertEquals(perThread, count, "every event from every thread must be written");
         }

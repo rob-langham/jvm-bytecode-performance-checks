@@ -43,7 +43,7 @@ public final class AllocationFlightAgent {
     }
 
     private static void install(String args, Instrumentation instrumentation, boolean retransformExisting) {
-        AllocationTrace trace = openTrace(directoryFrom(args), warmupNanosFrom(args));
+        AllocationTrace trace = openTrace(directoryFrom(args), warmupMillisFrom(args));
         AllocationTrace.install(trace);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> closeQuietly(trace), "allocation-trace-close"));
 
@@ -61,10 +61,10 @@ public final class AllocationFlightAgent {
     }
 
     /**
-     * The {@code warmup=} option, in seconds, as nanoseconds. Zero when absent: then every event is
+     * The {@code warmup=} option, in seconds, as milliseconds. Zero when absent: then every event is
      * steady state, and the report says so.
      */
-    static long warmupNanosFrom(String args) {
+    static long warmupMillisFrom(String args) {
         String seconds = option(args, "warmup");
         if (seconds == null) {
             return 0L;
@@ -73,7 +73,7 @@ public final class AllocationFlightAgent {
         if (value < 0) {
             throw new IllegalArgumentException("warmup must not be negative: " + seconds);
         }
-        return Math.round(value * 1e9);
+        return Math.round(value * 1000);
     }
 
     /** The value of {@code name=value} among comma-separated agent options, or null. */
@@ -88,9 +88,9 @@ public final class AllocationFlightAgent {
         return null;
     }
 
-    private static AllocationTrace openTrace(Path directory, long warmupNanos) {
+    private static AllocationTrace openTrace(Path directory, long warmupMillis) {
         try {
-            return AllocationTrace.open(directory, warmupNanos);
+            return AllocationTrace.open(directory, warmupMillis);
         } catch (IOException e) {
             throw new UncheckedIOException("cannot open allocation trace in " + directory, e);
         }

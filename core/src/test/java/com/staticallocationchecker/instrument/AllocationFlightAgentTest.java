@@ -95,11 +95,11 @@ class AllocationFlightAgentTest {
 
     @Test
     void warmupIsTheWarmupOptionInSecondsAndZeroWhenAbsent() {
-        assertEquals(500_000_000L, AllocationFlightAgent.warmupNanosFrom("dir=out,warmup=0.5"));
-        assertEquals(2_000_000_000L, AllocationFlightAgent.warmupNanosFrom("warmup=2"));
-        assertEquals(0L, AllocationFlightAgent.warmupNanosFrom("dir=out"));
-        assertEquals(0L, AllocationFlightAgent.warmupNanosFrom(null));
-        assertThrows(IllegalArgumentException.class, () -> AllocationFlightAgent.warmupNanosFrom("warmup=-1"));
+        assertEquals(500L, AllocationFlightAgent.warmupMillisFrom("dir=out,warmup=0.5"));
+        assertEquals(2_000L, AllocationFlightAgent.warmupMillisFrom("warmup=2"));
+        assertEquals(0L, AllocationFlightAgent.warmupMillisFrom("dir=out"));
+        assertEquals(0L, AllocationFlightAgent.warmupMillisFrom(null));
+        assertThrows(IllegalArgumentException.class, () -> AllocationFlightAgent.warmupMillisFrom("warmup=-1"));
     }
 
     @Test

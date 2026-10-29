@@ -81,7 +81,7 @@ class DynamicAttachTest {
             }
         }
         List<Integer> warmEvents = new ArrayList<>();
-        AllocationTraceReader.forEachEvent(trace, (code, nanos) -> {
+        AllocationTraceReader.forEachEvent(trace, (code, millis) -> {
             if (warmCodes.contains(code)) {
                 warmEvents.add(code);
             }

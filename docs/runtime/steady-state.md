@@ -57,7 +57,8 @@ The agent records every allocation site in the application, and the report decid
 means afterwards.
 
 1. **The agent writes a trace.** Each allocation appends a fixed 12-byte record to `allocations.bin`:
-   a 4-byte site code, then an 8-byte timestamp in nanoseconds. A `warmup.txt` file records when the
+   a 4-byte site code, then an 8-byte timestamp in milliseconds since the Unix epoch, so timestamps from
+   different processes can be compared. A `warmup.txt` file records when the
    warm-up period ends.
 2. **A key file says what each code is.** `allocations.keys` has one `code<TAB>site` line per site,
    where the site is `class#method:line@offset:CATEGORY`. The key names the allocation in the
@@ -139,17 +140,17 @@ so they are counted but not judged.
 
 ```
 Allocation trace: examples/steady-state-demo/build/trace
-Events: 246 over 3250.364 ms, from 14 site(s)
-Warm-up: ends 442.409 ms into the run. Only allocations after that are steady state.
+Events: 254 over 3887 ms, from 14 site(s)
+Warm-up: ends 425 ms into the run. Only allocations after that are steady state.
 
 By contract:
-  warmup          sites    2  warm-up events         49  steady events         64  still allocating 1  violations 0
-  unannotated     sites   12  warm-up events         33  steady events        100  still allocating 0  violations 0
+  warmup          sites    2  warm-up events         33  steady events         88  still allocating 1  violations 0
+  unannotated     sites   12  warm-up events         17  steady events        116  still allocating 0  violations 0
 
 code       count    warm-up     steady     first ms      last ms  contract        state             site
 ...
-12             1          1          0        4.949        4.949  warmup          steady            demo.PricingEngine#levels
-13           112         48         64        5.013     2902.758  warmup          STILL ALLOCATING  demo.ResizingCache#scratch
+12             1          1          0            6            6  warmup          steady            demo.PricingEngine#levels
+13           120         32         88            6         3361  warmup          STILL ALLOCATING  demo.ResizingCache#scratch
 ```
 
 **`PricingEngine#levels` settles.** Its one allocation happens during warm-up, and nothing after

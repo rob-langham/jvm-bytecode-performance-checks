@@ -65,7 +65,7 @@ public final class TraceFixture implements AutoCloseable {
             Map<Integer, String> keys = AllocationTraceReader.readKeys(directory);
             Map<String, Long> counts = new HashMap<>();
             AllocationTraceReader.forEachEvent(directory,
-                    (code, nanos) -> counts.merge(keys.get(code), 1L, Long::sum));
+                    (code, millis) -> counts.merge(keys.get(code), 1L, Long::sum));
             return counts;
         } catch (IOException e) {
             throw new UncheckedIOException(e);

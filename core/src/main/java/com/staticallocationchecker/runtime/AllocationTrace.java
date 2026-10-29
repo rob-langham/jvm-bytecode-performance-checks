@@ -23,7 +23,9 @@ import java.util.function.LongSupplier;
  *
  * <ul>
  *   <li>{@value #EVENTS_FILE} - one fixed-size 12-byte record per allocation: a big-endian {@code int}
- *       site code, then a big-endian {@code long} timestamp in nanoseconds ({@link System#nanoTime()}).
+ *       site code, then a big-endian {@code long} timestamp in milliseconds since the Unix epoch ({@link System#currentTimeMillis()}).
+ *       Epoch milliseconds, unlike {@link System#nanoTime()}, mean the same thing in every process, so
+ *       traces from several JVMs can be put on one timeline.
  *       Records are never split across writes, so the file is always a whole number of records.</li>
  *   <li>{@value #KEYS_FILE} - a text file with one {@code code<TAB>siteKey} line per site, written
  *       when the site is first instrumented. The key says where the allocation is in the bytecode:
@@ -49,7 +51,7 @@ public final class AllocationTrace implements Closeable {
     public static final String KEYS_FILE = "allocations.keys";
 
     /**
-     * The warm-up boundary: a single line {@code endNanos=<nanoTime>}. Events stamped before it came
+     * The warm-up boundary: a single line {@code endMillis=<epoch milliseconds>}. Events stamped before it came
      * from the warm-up period, and events at or after it are steady state. Written when the trace opens,
      * so a trace that is cut short still says where its warm-up ended.
      */
@@ -69,29 +71,29 @@ public final class AllocationTrace implements Closeable {
     private final ThreadLocal<Buffer> local = ThreadLocal.withInitial(this::newBuffer);
     private volatile boolean closed;
 
-    private AllocationTrace(Path directory, long warmupNanos, LongSupplier clock) throws IOException {
+    private AllocationTrace(Path directory, long warmupMillis, LongSupplier clock) throws IOException {
         this.clock = clock;
         this.events = FileChannel.open(directory.resolve(EVENTS_FILE),
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
         this.keys = Files.newBufferedWriter(directory.resolve(KEYS_FILE), StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
-        long endNanos = clock.getAsLong() + warmupNanos;
+        long endMillis = clock.getAsLong() + warmupMillis;
         Files.write(directory.resolve(WARMUP_FILE),
-                ("endNanos=" + endNanos + "\n").getBytes(StandardCharsets.UTF_8));
+                ("endMillis=" + endMillis + "\n").getBytes(StandardCharsets.UTF_8));
     }
 
-    /** Opens a trace in {@code directory}, creating it if needed, timed by {@link System#nanoTime()}. */
+    /** Opens a trace in {@code directory}, creating it if needed, timed by {@link System#currentTimeMillis()}. */
     public static AllocationTrace open(Path directory) throws IOException {
-        return open(directory, System::nanoTime);
+        return open(directory, System::currentTimeMillis);
     }
 
     /**
-     * Opens a trace in {@code directory} whose first {@code warmupNanos} are warm-up. With zero, every
+     * Opens a trace in {@code directory} whose first {@code warmupMillis} are warm-up. With zero, every
      * event is steady state.
      */
-    public static AllocationTrace open(Path directory, long warmupNanos) throws IOException {
+    public static AllocationTrace open(Path directory, long warmupMillis) throws IOException {
         Files.createDirectories(directory);
-        return new AllocationTrace(directory, warmupNanos, System::nanoTime);
+        return new AllocationTrace(directory, warmupMillis, System::currentTimeMillis);
     }
 
     /** Opens a trace with no warm-up whose timestamps come from {@code clock}. Intended for tests. */
@@ -99,10 +101,10 @@ public final class AllocationTrace implements Closeable {
         return open(directory, 0L, clock);
     }
 
-    /** Opens a trace with a warm-up of {@code warmupNanos} whose timestamps come from {@code clock}. */
-    public static AllocationTrace open(Path directory, long warmupNanos, LongSupplier clock) throws IOException {
+    /** Opens a trace with a warm-up of {@code warmupMillis} whose timestamps come from {@code clock}. */
+    public static AllocationTrace open(Path directory, long warmupMillis, LongSupplier clock) throws IOException {
         Files.createDirectories(directory);
-        return new AllocationTrace(directory, warmupNanos, clock);
+        return new AllocationTrace(directory, warmupMillis, clock);
     }
 
     /** Installs {@code trace} as the destination for instrumented sites (or null to stop recording). */

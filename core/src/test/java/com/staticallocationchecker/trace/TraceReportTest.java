@@ -68,8 +68,8 @@ class TraceReportTest {
 
         String report = TraceReport.render(dir, List.of(fixtureClasses()));
 
-        assertTrue(report.contains("Events: 8 over 0.002 ms, from 7 site(s)"), report);
-        assertTrue(report.contains("Warm-up: ends 0.000 ms into the run."), report);
+        assertTrue(report.contains("Events: 8 over 1900 ms, from 7 site(s)"), report);
+        assertTrue(report.contains("Warm-up: ends 50 ms into the run."), report);
     }
 
     @Test
