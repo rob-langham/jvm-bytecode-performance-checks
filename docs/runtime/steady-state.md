@@ -53,15 +53,18 @@ That is what the runtime trace is for.
 
 ## How it works
 
-The agent records every allocation, and the report decides what it means afterwards.
+The agent records every allocation site in the application, and the report decides what each one
+means afterwards.
 
-1. **The agent writes a trace.** Each allocation at a warmup site appends a fixed 12-byte record to
-   `allocations.bin`: a 4-byte site code, then an 8-byte timestamp in nanoseconds.
+1. **The agent writes a trace.** Each allocation appends a fixed 12-byte record to `allocations.bin`:
+   a 4-byte site code, then an 8-byte timestamp in nanoseconds.
 2. **A key file says what each code is.** `allocations.keys` has one `code<TAB>site` line per site,
    where the site is `class#method:line@offset:CATEGORY`. The key names the allocation in the
    bytecode, so the same site always has the same key.
 3. **The report reads both files.** It turns the trace into counts and times, then reads the classes
-   for their annotations and runs the static checker over them.
+   for their annotations and runs the static checker over them. The annotations decide what a site
+   means: a warmup site is expected to settle, an allocation under `@ZeroAllocations` is a violation,
+   and anything else is counted but not judged.
 
 Attach it at startup:
 
@@ -76,7 +79,8 @@ The `dir=` option is where the trace goes. It defaults to `allocation-trace` in 
 directory. The trace is complete when the JVM exits normally.
 
 Your source is untouched. At class load the agent inserts a single `LDC code; INVOKESTATIC recordSite`
-before each allocation. In `PricingEngine#levels` the effect is as if the method had been written:
+before each allocation, in every method. In `PricingEngine#levels` the effect is as if the method had
+been written:
 
 ```java
 @AllocationsForWarmup
@@ -90,8 +94,8 @@ long[] levels() {
 ```
 
 The probe is an integer constant and a static call. Nothing is analysed while the program runs, which
-keeps the added work small. Whether any remaining cost changes what the JIT compiles is something to
-measure on your own workload, not something this page claims.
+keeps the added work small. Recording every site makes the probe count much larger than before, so the
+cost is a real question: measure it on your own workload. This page does not claim it is free.
 
 ## The demo
 
@@ -127,30 +131,29 @@ No findings. Statically, these two classes are equally well-behaved.
 
 ## Then: the trace says which one settles
 
-This is real output from one run of the demo:
+This is real output from one run of the demo. The trace records every site in the program, so the
+driver's own allocations appear too. They are `unannotated`, so they are counted but not judged.
+Abridged:
 
 ```
 Allocation trace: examples/steady-state-demo/build/trace
-Events: 171 over 2863.571 ms, from 2 site(s)
-Steady: no allocations in the last 20% of the run.
+Events: 263 over 3100.953 ms, from 14 site(s)
+Warmup sites are steady when they make no allocations in the last 20% of the run.
 
-code       count     first ms      last ms  state              site
-0              2        0.000        0.002  steady             demo.PricingEngine#levels
-1            169        0.187     2863.571  STILL ALLOCATING   demo.ResizingCache#scratch
+By contract:
+  warmup          sites    2  events        130  still allocating 1  violations 0
+  unannotated     sites   12  events        133  still allocating 0  violations 0
 
-Sites:
-  0  demo.PricingEngine#levels:26@9:NEW_ARRAY
-      contract: @AllocationsForWarmup
-      static findings on this method: 0
-  1  demo.ResizingCache#scratch:26@15:NEW_ARRAY
-      contract: @AllocationsForWarmup
-      static findings on this method: 0
+code       count     first ms      last ms  contract        state              site
+...
+12             1        5.500        5.500  warmup          steady             demo.PricingEngine#levels
+13           129        5.577     2593.068  warmup          STILL ALLOCATING   demo.ResizingCache#scratch
 ```
 
-**`PricingEngine#levels` settles immediately.** Its two allocations both happen at the start, and
-then nothing for the rest of the run. That is warmup working as the annotation claims.
+**`PricingEngine#levels` settles immediately.** Its allocations happen at the start, and then nothing
+for the rest of the run. That is warmup working as the annotation claims.
 
-**`ResizingCache#scratch` never does.** It is still allocating in the final moments of the run. On a
+**`ResizingCache#scratch` never does.** It is still allocating near the end of the run. On a
 latency-sensitive path this is a slow leak of GC pressure that no amount of code review or static
 checking would have found.
 

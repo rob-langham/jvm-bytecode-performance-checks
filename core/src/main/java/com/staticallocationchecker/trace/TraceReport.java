@@ -2,7 +2,6 @@ package com.staticallocationchecker.trace;
 
 import com.staticallocationchecker.AllocationChecker;
 import com.staticallocationchecker.Finding;
-import com.staticallocationchecker.Report;
 import com.staticallocationchecker.runtime.AllocationTraceReader;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -10,6 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,25 +21,47 @@ import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.MethodNode;
 
 /**
- * Turns a trace written by the agent into a report, and ties each site back to the bytecode that
- * made it.
+ * Turns a trace written by the agent into a report, and says what each site means under the
+ * annotations that govern it.
  *
- * <p>For every site the report gives the count, when it first and last fired, and whether it is
- * <em>steady</em>: a site that makes no allocations in the final part of the run has settled. It
- * then reads the classes the site belongs to and says what contract governs it - an
- * {@code @AllocationsForWarmup} method, or a synthetic lambda body reached from one - and how many
- * static findings the checker reports against that method.
+ * <p>The trace records every allocation site, so most of what it shows is not a problem. What a site
+ * <em>means</em> depends on the contract its method is under, read from the bytecode:
  *
- * <p>Usage: {@code TraceReport <trace-directory> [classes-directory...]}. The class directories are
- * where the annotated bytecode lives; without them the report still shows the trace, but cannot say
- * anything about the contracts.
+ * <ul>
+ *   <li>{@code warmup} - an {@code @AllocationsForWarmup} method (or type). The site is expected to
+ *       settle: it is {@code steady} if it makes no allocations in the final part of the run, and
+ *       {@code STILL ALLOCATING} if it does.</li>
+ *   <li>{@code zero-allocation} - a {@code @ZeroAllocations} method (or type). Any event here is a
+ *       {@code VIOLATION}: the static checker should have stopped it, or it ran through a path the
+ *       checker could not see.</li>
+ *   <li>{@code unannotated} - no contract applies. The site is reported with its counts, not judged.</li>
+ *   <li>{@code unknown} - the class was not among the directories given, so its annotations cannot be read.</li>
+ * </ul>
+ *
+ * <p>Usage: {@code TraceReport <trace-directory> [classes-directory...]}. Without class directories the
+ * trace is still reported, but every site is {@code unknown}.
  */
 public final class TraceReport {
 
-    /** A site is steady when its last allocation falls before this share of the run. */
+    /** A warmup site is steady when its last allocation falls before this share of the run. */
     static final double STEADY_BEFORE = 0.8;
 
     private static final String WARMUP = "Lcom/staticallocationchecker/annotations/AllocationsForWarmup;";
+    private static final String ZERO = "Lcom/staticallocationchecker/annotations/ZeroAllocations;";
+
+    /** The contract a site falls under, from its bytecode. */
+    enum Contract {
+        WARMUP("warmup"),
+        ZERO_ALLOCATIONS("zero-allocation"),
+        UNANNOTATED("unannotated"),
+        UNKNOWN("unknown");
+
+        final String label;
+
+        Contract(String label) {
+            this.label = label;
+        }
+    }
 
     private TraceReport() {
     }
@@ -73,36 +95,79 @@ public final class TraceReport {
             return out.toString();
         }
 
+        Bytecode bytecode = new Bytecode(classRoots);
         long span = run.last - run.first;
         out.append(String.format("Events: %d over %.3f ms, from %d site(s)%n",
                 run.count, span / 1e6, tallies.size()));
-        out.append(String.format("Steady: no allocations in the last %d%% of the run.%n%n",
+        out.append(String.format("Warmup sites are steady when they make no allocations in the last %d%% of the run.%n%n",
                 (int) Math.round((1 - STEADY_BEFORE) * 100)));
-        out.append(String.format("%-5s %10s %12s %12s  %-18s %s%n",
-                "code", "count", "first ms", "last ms", "state", "site"));
 
-        Bytecode bytecode = new Bytecode(classRoots);
+        // Per-contract totals first: the question is usually "is anything wrong", not "which code".
+        Map<Contract, long[]> totals = new EnumMap<>(Contract.class);
+        Map<Contract, Integer> sites = new EnumMap<>(Contract.class);
+        Map<Contract, Integer> violations = new EnumMap<>(Contract.class);
+        Map<Contract, Integer> stillAllocating = new EnumMap<>(Contract.class);
+
+        StringBuilder rows = new StringBuilder();
         StringBuilder details = new StringBuilder();
         for (Map.Entry<Integer, Tally> entry : tallies.entrySet()) {
             int code = entry.getKey();
             Tally tally = entry.getValue();
-            boolean steady = span == 0 || tally.last - run.first <= STEADY_BEFORE * span;
             String key = keys.get(code);
-            out.append(String.format("%-5d %10d %12.3f %12.3f  %-18s %s%n", code, tally.count,
+            Contract contract = key == null ? Contract.UNKNOWN : bytecode.contractOf(key);
+            String state = stateOf(contract, tally, run, span);
+
+            totals.computeIfAbsent(contract, c -> new long[1])[0] += tally.count;
+            sites.merge(contract, 1, Integer::sum);
+            if (state.equals("VIOLATION")) {
+                violations.merge(contract, 1, Integer::sum);
+            } else if (state.equals("STILL ALLOCATING")) {
+                stillAllocating.merge(contract, 1, Integer::sum);
+            }
+
+            rows.append(String.format("%-5d %10d %12.3f %12.3f  %-15s %-18s %s%n", code, tally.count,
                     (tally.first - run.first) / 1e6, (tally.last - run.first) / 1e6,
-                    steady ? "steady" : "STILL ALLOCATING", key == null ? "?" : shortName(key)));
+                    contract.label, state, key == null ? "?" : shortName(key)));
 
             if (key == null) {
-                details.append("  code ").append(code).append(": no key recorded for this code\n");
+                details.append("  ").append(code).append(": no key recorded for this code\n");
                 continue;
             }
             details.append(String.format("  %d  %s%n", code, key));
-            details.append("      contract: ").append(bytecode.contractOf(key)).append('\n');
+            details.append("      contract: ").append(bytecode.describe(key)).append('\n');
             details.append("      static findings on this method: ")
                     .append(bytecode.findingsOn(key)).append('\n');
         }
+
+        out.append("By contract:\n");
+        for (Contract contract : Contract.values()) {
+            if (!sites.containsKey(contract)) {
+                continue;
+            }
+            out.append(String.format("  %-15s sites %4d  events %10d  still allocating %d  violations %d%n",
+                    contract.label, sites.get(contract), totals.get(contract)[0],
+                    stillAllocating.getOrDefault(contract, 0), violations.getOrDefault(contract, 0)));
+        }
+
+        out.append('\n');
+        out.append(String.format("%-5s %10s %12s %12s  %-15s %-18s %s%n",
+                "code", "count", "first ms", "last ms", "contract", "state", "site"));
+        out.append(rows);
         out.append('\n').append("Sites:\n").append(details);
         return out.toString();
+    }
+
+    /** What the site's events say, given the contract it is under. */
+    static String stateOf(Contract contract, Tally tally, Tally run, long span) {
+        switch (contract) {
+            case WARMUP:
+                boolean steady = span == 0 || tally.last - run.first <= STEADY_BEFORE * span;
+                return steady ? "steady" : "STILL ALLOCATING";
+            case ZERO_ALLOCATIONS:
+                return "VIOLATION";
+            default:
+                return "-";
+        }
     }
 
     /** {@code class#method}, without the line, offset and category. */
@@ -111,7 +176,7 @@ public final class TraceReport {
     }
 
     /** Count and time window for one site. Timestamps may arrive out of order across threads. */
-    private static final class Tally {
+    static final class Tally {
         long count;
         long first = Long.MAX_VALUE;
         long last = Long.MIN_VALUE;
@@ -124,8 +189,9 @@ public final class TraceReport {
     }
 
     /**
-     * The bytecode side of the report: the annotations on each site's method, and the checker's
-     * findings. Built lazily, so a report over a trace with no class directories does no analysis.
+     * The bytecode side of the report: the annotations on each site's method and class, and the
+     * checker's findings. Classes are read lazily, so a report over a trace with no class directories
+     * does no analysis.
      */
     private static final class Bytecode {
         private final List<Path> roots;
@@ -142,8 +208,27 @@ public final class TraceReport {
             }
         }
 
-        /** What governs the method a site key names, read from its bytecode. */
-        String contractOf(String key) throws IOException {
+        /** The contract that governs the method a site key names. */
+        Contract contractOf(String key) {
+            String[] site = parse(key);
+            ClassNode owner = classNode(site[0]);
+            if (owner == null) {
+                return Contract.UNKNOWN;
+            }
+            MethodNode method = method(owner, site[1]);
+            if (method == null) {
+                return Contract.UNKNOWN;
+            }
+            // A method-level annotation is more specific than a type-level one, so it wins.
+            Contract own = contractOf(method.visibleAnnotations);
+            if (own != Contract.UNANNOTATED) {
+                return own;
+            }
+            return contractOf(owner.visibleAnnotations);
+        }
+
+        /** A sentence saying what the contract is and why, for the details section. */
+        String describe(String key) {
             String[] site = parse(key);
             ClassNode owner = classNode(site[0]);
             if (owner == null) {
@@ -153,13 +238,16 @@ public final class TraceReport {
             if (method == null) {
                 return "method not found in class";
             }
-            if (has(method.visibleAnnotations) || has(owner.visibleAnnotations)) {
-                return "@AllocationsForWarmup";
+            switch (contractOf(key)) {
+                case WARMUP:
+                    return "@AllocationsForWarmup";
+                case ZERO_ALLOCATIONS:
+                    return "@ZeroAllocations";
+                default:
+                    return (method.access & Opcodes.ACC_SYNTHETIC) != 0
+                            ? "unannotated (synthetic lambda body)"
+                            : "unannotated";
             }
-            if ((method.access & Opcodes.ACC_SYNTHETIC) != 0) {
-                return "lambda body reached from a warmup method";
-            }
-            return "NOT annotated - the agent should not have instrumented this";
         }
 
         /** How many findings the checker reports against the method a site key names. */
@@ -168,7 +256,22 @@ public final class TraceReport {
             return findings.getOrDefault(site[0] + "#" + site[1], 0);
         }
 
-        private ClassNode classNode(String binaryName) throws IOException {
+        private static Contract contractOf(List<AnnotationNode> annotations) {
+            if (annotations == null) {
+                return Contract.UNANNOTATED;
+            }
+            for (AnnotationNode annotation : annotations) {
+                if (WARMUP.equals(annotation.desc)) {
+                    return Contract.WARMUP;
+                }
+                if (ZERO.equals(annotation.desc)) {
+                    return Contract.ZERO_ALLOCATIONS;
+                }
+            }
+            return Contract.UNANNOTATED;
+        }
+
+        private ClassNode classNode(String binaryName) {
             if (classes.containsKey(binaryName)) {
                 return classes.get(binaryName);
             }
@@ -178,7 +281,11 @@ public final class TraceReport {
                 Path file = root.resolve(internal);
                 if (Files.isRegularFile(file)) {
                     node = new ClassNode();
-                    new ClassReader(Files.readAllBytes(file)).accept(node, ClassReader.SKIP_CODE);
+                    try {
+                        new ClassReader(Files.readAllBytes(file)).accept(node, ClassReader.SKIP_CODE);
+                    } catch (IOException e) {
+                        node = null;
+                    }
                     break;
                 }
             }
@@ -191,17 +298,13 @@ public final class TraceReport {
             MethodNode match = null;
             for (MethodNode method : owner.methods) {
                 if (method.name.equals(name)) {
-                    if (has(method.visibleAnnotations)) {
+                    if (contractOf(method.visibleAnnotations) != Contract.UNANNOTATED) {
                         return method;
                     }
                     match = match == null ? method : match;
                 }
             }
             return match;
-        }
-
-        private static boolean has(List<AnnotationNode> annotations) {
-            return annotations != null && annotations.stream().anyMatch(a -> WARMUP.equals(a.desc));
         }
 
         /** Splits {@code class#method:line@offset:CATEGORY} into {@code [class, method]}. */

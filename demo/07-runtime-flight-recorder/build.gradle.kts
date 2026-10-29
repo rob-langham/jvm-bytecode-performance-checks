@@ -67,8 +67,8 @@ tasks.register<JavaExec>("verifyRun") {
         val output = captured.toString()
         println(output)
 
-        // One row per site in the summary table: code, count, first, last, state, class#method.
-        val states = Regex("(?m)^\\d+\\s+\\d+\\s+[\\d.]+\\s+[\\d.]+\\s+(steady|STILL ALLOCATING)\\s+(\\S+)$")
+        // One row per site in the summary table: code, count, first, last, contract, state, class#method.
+        val states = Regex("(?m)^\\d+\\s+\\d+\\s+[\\d.]+\\s+[\\d.]+\\s+\\S+\\s+(steady|STILL ALLOCATING|VIOLATION|-)\\s+(\\S+)$")
             .findAll(output)
             .associate { match -> match.groupValues[2] to match.groupValues[1] }
 

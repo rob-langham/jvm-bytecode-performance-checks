@@ -10,6 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.staticallocationchecker.TraceFixture;
 import com.staticallocationchecker.instrument.fixtures.NotWarmup;
 import com.staticallocationchecker.instrument.fixtures.WarmupTarget;
+import com.staticallocationchecker.instrument.fixtures.WarmupWithoutAllocation;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.lang.instrument.ClassFileTransformer;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -23,7 +26,7 @@ import org.junit.jupiter.api.io.TempDir;
  * The transformer's contract with the JVM: never throw, return null when unchanged, and survive
  * being handed input it cannot make sense of.
  */
-class WarmupClassFileTransformerTest {
+class AllocationClassFileTransformerTest {
 
     @TempDir
     Path dir;
@@ -35,7 +38,7 @@ class WarmupClassFileTransformerTest {
     @BeforeEach
     void installTrace() throws Exception {
         trace = new TraceFixture(dir);
-        transformer = new WarmupClassFileTransformer(trace.trace());
+        transformer = new AllocationClassFileTransformer(trace.trace());
     }
 
     @AfterEach
@@ -54,17 +57,44 @@ class WarmupClassFileTransformerTest {
     @Test
     void rewritesAWarmupClass() {
         byte[] result = transform(
-                "com/staticallocationchecker/instrument/fixtures/WarmupTarget",
+                "demo/WarmupTarget",
                 originalBytes(WarmupTarget.class));
 
         assertNotNull(result);
     }
 
     @Test
-    void returnsNullForAClassWithNoWarmupMethods() {
+    void returnsNullForAClassWithNoAllocationSites() {
         assertNull(transform(
-                "com/staticallocationchecker/instrument/fixtures/NotWarmup",
-                originalBytes(NotWarmup.class)));
+                "demo/WarmupWithoutAllocation",
+                originalBytes(WarmupWithoutAllocation.class)));
+    }
+
+    @Test
+    void recordsAllocationsInOrdinaryClassesToo() {
+        assertNotNull(transform("demo/NotWarmup", originalBytes(NotWarmup.class)),
+                "every allocation site is recorded, not only those under a warmup annotation");
+    }
+
+    @Test
+    void neverInstrumentsTheAgentItself() {
+        assertNull(transform("com/staticallocationchecker/runtime/AllocationTrace",
+                originalBytes(WarmupTarget.class)),
+                "the recorder must not record its own allocations, or it could recurse");
+    }
+
+    @Test
+    void declinesALoaderThatCannotSeeTheTraceAndSaysSo() throws Exception {
+        List<String> diagnostics = new ArrayList<>();
+        ClassFileTransformer reporting = new AllocationClassFileTransformer(trace.trace(), diagnostics::add);
+
+        try (URLClassLoader isolated = new URLClassLoader(new URL[0], null)) {
+            assertNull(reporting.transform(isolated, "demo/WarmupTarget", null, null,
+                    originalBytes(WarmupTarget.class)));
+        }
+
+        assertEquals(1, diagnostics.size(), () -> "the refusal should be reported once: " + diagnostics);
+        assertTrue(diagnostics.get(0).contains("cannot see the allocation trace"), diagnostics.get(0));
     }
 
     @Test
@@ -90,7 +120,7 @@ class WarmupClassFileTransformerTest {
     @Test
     void reportsWhyItDeclinedToTransformAClass() throws Exception {
         List<String> diagnostics = new ArrayList<>();
-        ClassFileTransformer reporting = new WarmupClassFileTransformer(trace.trace(), diagnostics::add);
+        ClassFileTransformer reporting = new AllocationClassFileTransformer(trace.trace(), diagnostics::add);
 
         reporting.transform(loader, "com/example/Corrupt", null, null, new byte[] {1, 2, 3, 4});
 
@@ -103,7 +133,7 @@ class WarmupClassFileTransformerTest {
     @Test
     void reportsEachDistinctFailureOnlyOnce() throws Exception {
         List<String> diagnostics = new ArrayList<>();
-        ClassFileTransformer reporting = new WarmupClassFileTransformer(trace.trace(), diagnostics::add);
+        ClassFileTransformer reporting = new AllocationClassFileTransformer(trace.trace(), diagnostics::add);
 
         for (int i = 0; i < 50; i++) {
             reporting.transform(loader, "com/example/Corrupt" + i, null, null, new byte[] {1, 2, 3, 4});
@@ -115,7 +145,7 @@ class WarmupClassFileTransformerTest {
 
     @Test
     void survivesADiagnosticSinkThatItselfThrows() {
-        ClassFileTransformer reporting = new WarmupClassFileTransformer(trace.trace(), message -> {
+        ClassFileTransformer reporting = new AllocationClassFileTransformer(trace.trace(), message -> {
             throw new IllegalStateException("logging is broken");
         });
 

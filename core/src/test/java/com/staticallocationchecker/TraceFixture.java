@@ -42,6 +42,17 @@ public final class TraceFixture implements AutoCloseable {
         return counts().values().stream().mapToLong(Long::longValue).sum();
     }
 
+    /**
+     * Events recorded in one method, by name. Every allocation in a class is now recorded, so a
+     * whole-trace total also counts constructors and helpers the test did not mean to measure.
+     */
+    public long totalIn(String method) {
+        return counts().entrySet().stream()
+                .filter(e -> e.getKey().contains("#" + method + ":"))
+                .mapToLong(Map.Entry::getValue)
+                .sum();
+    }
+
     /** The site keys that have fired at least once. */
     public Set<String> firedKeys() {
         return counts().keySet();

@@ -15,10 +15,15 @@ show what this README claims.
 ## Expected output
 
 ```
-code       count     first ms      last ms  state              site
-0              1        0.000        0.000  steady             demo.runtime.PricingEngine#levels
-1            300        0.310      142.507  STILL ALLOCATING   demo.runtime.ResizingCache#scratch
+By contract:
+  warmup          sites    2  events        301  still allocating 1  violations 0
+  unannotated     sites    5  events         20  still allocating 0  violations 0
+
+code       count     first ms      last ms  contract        state              site
+5              1        1.859        1.859  warmup          steady             demo.runtime.PricingEngine#levels
+6            300        1.870       44.548  warmup          STILL ALLOCATING   demo.runtime.ResizingCache#scratch
 ```
+
 
 `PricingEngine#levels` fires **once** and never again, through three million operations.
 `ResizingCache#scratch` is still allocating at the end of the run.
@@ -35,12 +40,14 @@ bug the checker structurally cannot find.
 
 ## How the agent is wired
 
-The agent instruments `@AllocationsForWarmup` methods at class-load time. Each allocation writes a
-12-byte record to `allocations.bin` in the trace directory: a site code, then a nanosecond
+The agent records every allocation site in the application at class-load time. Each allocation
+writes a 12-byte record to `allocations.bin` in the trace directory: a site code, then a nanosecond
 timestamp. `allocations.keys` maps each code to the site it stands for. The agent does no analysis;
 it stays out of the way of the JIT.
 
-The report reads both files, and reads this build's classes to say what contract governs each site.
+The report reads both files, and reads this build's classes for the `@AllocationsForWarmup` and
+`@ZeroAllocations` annotations. Those decide what each site means: the warmup site is expected to
+settle, and an allocation under `@ZeroAllocations` would be a violation.
 
 It is a **separate, shaded artifact** from the library jar. A `-javaagent` jar is appended to the
 system class path with nothing beside it, so it must carry its own dependencies — with ASM

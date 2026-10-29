@@ -301,8 +301,8 @@ they actually stop happening, attach the agent:
 java -javaagent:core/build/libs/core-0.1.0-agent.jar=dir=build/allocation-trace -jar your-app.jar
 ```
 
-The agent instruments `@AllocationsForWarmup` methods at class-load time and writes every allocation
-they make to two files in the trace directory:
+The agent records every allocation site in the application at class-load time, and writes each
+allocation to two files in the trace directory:
 
 | File | Contents |
 | --- | --- |
@@ -319,8 +319,16 @@ java -cp core/build/libs/core-0.1.0.jar com.staticallocationchecker.trace.TraceR
      build/allocation-trace target/classes
 ```
 
-The report gives each site's count, first and last time, whether it settled, and the contract that
-governs it in the bytecode.
+The report gives each site's count, first and last time, and the contract that governs it. The
+contract comes from the `@AllocationsForWarmup` and `@ZeroAllocations` annotations in the bytecode, and
+it decides how a site is judged:
+
+| Contract | Judgement |
+| --- | --- |
+| `warmup` | `steady`, or `STILL ALLOCATING` if it fires near the end of the run |
+| `zero-allocation` | `VIOLATION` if it fires at all |
+| `unannotated` | Counted, not judged |
+| `unknown` | Its class was not in the directories given to the report |
 
 {: .note }
 > Use the **agent** jar, not the library jar. A `-javaagent` jar is appended to the system class

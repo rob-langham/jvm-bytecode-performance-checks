@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.staticallocationchecker.TraceFixture;
-import com.staticallocationchecker.instrument.fixtures.NotWarmup;
+import com.staticallocationchecker.instrument.fixtures.WarmupWithoutAllocation;
 import com.staticallocationchecker.instrument.fixtures.WarmupTarget;
 import com.staticallocationchecker.runtime.AllocationTrace;
 import java.lang.instrument.ClassFileTransformer;
@@ -40,19 +40,19 @@ class AllocationFlightAgentTest {
     }
 
     @Test
-    void transformerInstrumentsOnlyWarmupClasses() {
-        WarmupClassFileTransformer transformer = new WarmupClassFileTransformer(trace.trace());
+    void transformerInstrumentsAnyClassThatAllocates() {
+        AllocationClassFileTransformer transformer = new AllocationClassFileTransformer(trace.trace());
         ClassLoader loader = getClass().getClassLoader();
 
         byte[] warmup = transformer.transform(loader,
-                "com/staticallocationchecker/instrument/fixtures/WarmupTarget",
+                "demo/WarmupTarget",
                 null, null, originalBytes(WarmupTarget.class));
         byte[] plain = transformer.transform(loader,
-                "com/staticallocationchecker/instrument/fixtures/NotWarmup",
-                null, null, originalBytes(NotWarmup.class));
+                "demo/WarmupWithoutAllocation",
+                null, null, originalBytes(WarmupWithoutAllocation.class));
 
-        assertNotNull(warmup, "warmup class should be instrumented");
-        assertNull(plain, "non-warmup class should be returned unchanged (null)");
+        assertNotNull(warmup, "a class with allocation sites should be instrumented");
+        assertNull(plain, "a class with no allocation sites should be returned unchanged (null)");
     }
 
     @Test
@@ -93,7 +93,7 @@ class AllocationFlightAgentTest {
     }
 
     @Test
-    void agentmainRetransformsAlreadyLoadedWarmupClasses() throws Exception {
+    void agentmainRetransformsAlreadyLoadedApplicationClasses() throws Exception {
         List<ClassFileTransformer> added = new ArrayList<>();
         List<String> retransformed = new ArrayList<>();
         try {
@@ -101,14 +101,14 @@ class AllocationFlightAgentTest {
                     recordingInstrumentation(added, retransformed));
 
             assertFalse(retransformed.isEmpty(),
-                    "already-loaded warmup classes should be retransformed on attach");
+                    "already-loaded application classes should be retransformed on attach");
         } finally {
             AllocationTrace.instance().close();
             AllocationTrace.install(null);
         }
     }
 
-    /** An {@code Instrumentation} that reports one already-loaded warmup class. */
+    /** An {@code Instrumentation} that reports one already-loaded application class. */
     private java.lang.instrument.Instrumentation recordingInstrumentation(
             List<ClassFileTransformer> added, List<String> retransformed) {
         return (java.lang.instrument.Instrumentation) Proxy.newProxyInstance(
@@ -120,11 +120,12 @@ class AllocationFlightAgentTest {
                             added.add((ClassFileTransformer) args[0]);
                             return null;
                         case "getAllLoadedClasses":
-                            return new Class<?>[] {WarmupTarget.class};
+                            return new Class<?>[] {org.junit.jupiter.api.Assertions.class};
                         case "isModifiableClass":
                         case "isRetransformClassesSupported":
                             return true;
                         case "retransformClasses":
+                            // Varargs: the proxy receives the array, even for a single class.
                             for (Class<?> c : (Class<?>[]) args[0]) {
                                 retransformed.add(c.getName());
                             }

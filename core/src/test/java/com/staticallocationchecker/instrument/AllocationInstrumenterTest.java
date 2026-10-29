@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.staticallocationchecker.TraceFixture;
 import com.staticallocationchecker.instrument.fixtures.EagerWarmup;
 import com.staticallocationchecker.instrument.fixtures.MixedWarmup;
-import com.staticallocationchecker.instrument.fixtures.NotWarmup;
+import com.staticallocationchecker.instrument.fixtures.WarmupWithoutAllocation;
 import com.staticallocationchecker.instrument.fixtures.WarmupKinds;
 import com.staticallocationchecker.instrument.fixtures.WarmupTarget;
 import java.nio.file.Path;
@@ -21,7 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-class WarmupInstrumenterTest {
+class AllocationInstrumenterTest {
 
     @TempDir
     Path dir;
@@ -38,8 +38,8 @@ class WarmupInstrumenterTest {
         trace.close();
     }
 
-    private WarmupInstrumenter instrumenter() {
-        return new WarmupInstrumenter(getClass().getClassLoader(), trace.siteCodes());
+    private AllocationInstrumenter instrumenter() {
+        return new AllocationInstrumenter(getClass().getClassLoader(), trace.siteCodes());
     }
 
     private Object instrumentAndInvoke(Class<?> fixture, String method) throws Exception {
@@ -63,16 +63,18 @@ class WarmupInstrumenterTest {
     }
 
     @Test
-    void leavesClassesWithoutWarmupMethodsUnchanged() {
-        byte[] result = instrumenter().instrument(originalBytes(NotWarmup.class));
-        assertNull(result, "a class with no warmup methods should not be rewritten");
+    void leavesClassesWithoutAllocationSitesUnchanged() {
+        byte[] result = instrumenter().instrument(originalBytes(WarmupWithoutAllocation.class));
+        assertNull(result, "a class with no allocation sites should not be rewritten");
     }
 
     @Test
-    void doesNotInstrumentNonWarmupMethods() throws Exception {
+    void recordsAllocationsInOrdinaryMethodsAsWellAsWarmupMethods() throws Exception {
         instrumentAndInvoke(MixedWarmup.class, "hot");
 
-        assertEquals(0L, trace.total(), "allocations in ordinary methods must not be recorded");
+        assertEquals(1L, trace.total(), "allocations in ordinary methods are recorded too");
+        assertTrue(trace.firedKeys().iterator().next().contains("#hot:"),
+                () -> "the site should name the ordinary method: " + trace.firedKeys());
     }
 
     @Test

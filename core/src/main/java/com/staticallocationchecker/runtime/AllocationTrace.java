@@ -17,7 +17,7 @@ import java.util.Map;
 import java.util.function.LongSupplier;
 
 /**
- * Writes every allocation that an instrumented warmup site makes to a binary trace file.
+ * Writes every allocation an instrumented site makes to a binary trace file.
  *
  * <p>Two files are produced in the trace directory:
  *

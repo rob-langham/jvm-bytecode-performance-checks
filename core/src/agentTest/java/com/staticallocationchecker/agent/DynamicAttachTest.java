@@ -72,13 +72,23 @@ class DynamicAttachTest {
         assertEquals(0, process.exitValue(), () -> "harness failed:\n" + String.join("\n", output));
         assertTrue(output.contains("DONE"), () -> "the harness should finish: " + output);
 
-        List<Integer> codes = new ArrayList<>();
-        AllocationTraceReader.forEachEvent(trace, (code, nanos) -> codes.add(code));
-        assertEquals(1, codes.size(),
-                () -> "the warmup allocation after attach should be recorded, which requires the "
-                        + "already-loaded class to have been retransformed");
+        // Every allocation site is recorded, so only the warm() site is asserted on here.
         Map<Integer, String> keys = AllocationTraceReader.readKeys(trace);
-        assertTrue(keys.get(codes.get(0)).contains("AttachHarness$Warmup#warm"), () -> "keys: " + keys);
+        List<Integer> warmCodes = new ArrayList<>();
+        for (Map.Entry<Integer, String> key : keys.entrySet()) {
+            if (key.getValue().contains("AttachHarness$Warmup#warm:")) {
+                warmCodes.add(key.getKey());
+            }
+        }
+        List<Integer> warmEvents = new ArrayList<>();
+        AllocationTraceReader.forEachEvent(trace, (code, nanos) -> {
+            if (warmCodes.contains(code)) {
+                warmEvents.add(code);
+            }
+        });
+        assertEquals(1, warmEvents.size(),
+                () -> "the warmup allocation after attach should be recorded, which requires the "
+                        + "already-loaded class to have been retransformed: " + keys);
         assertTrue(Files.exists(trace.resolve(AllocationTrace.EVENTS_FILE)));
     }
 

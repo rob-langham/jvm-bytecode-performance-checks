@@ -1,6 +1,5 @@
 package com.staticallocationchecker.instrument;
 
-import com.staticallocationchecker.annotations.AllocationsForWarmup;
 import com.staticallocationchecker.runtime.AllocationTrace;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -12,15 +11,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Java agent that instruments {@code @AllocationsForWarmup} methods at class-load time so every
- * allocation they make is written to an {@link AllocationTrace}.
+ * Java agent that records every allocation site in the application at class-load time, writing each
+ * allocation to an {@link AllocationTrace}.
  *
  * <p>Attach at startup with {@code -javaagent:core-<version>-agent.jar=dir=<trace-directory>}, or to
  * a running VM with the attach API. The trace directory defaults to {@value #DEFAULT_DIRECTORY} in
  * the working directory. It is closed, and its buffers flushed, when the JVM shuts down normally.
  *
- * <p>On attach, classes already loaded are retransformed, since in a warmup-monitoring tool those
- * are precisely the classes worth observing.
+ * <p>On attach, classes already loaded are retransformed, since they are exactly the classes a
+ * running application has been using.
  */
 public final class AllocationFlightAgent {
 
@@ -47,9 +46,9 @@ public final class AllocationFlightAgent {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> closeQuietly(trace), "allocation-trace-close"));
 
         boolean retransform = retransformExisting && instrumentation.isRetransformClassesSupported();
-        instrumentation.addTransformer(new WarmupClassFileTransformer(trace), retransform);
+        instrumentation.addTransformer(new AllocationClassFileTransformer(trace), retransform);
         if (retransform) {
-            retransformLoadedWarmupClasses(instrumentation);
+            retransformLoadedClasses(instrumentation);
         }
     }
 
@@ -82,63 +81,43 @@ public final class AllocationFlightAgent {
     }
 
     /**
-     * Retransforms already-loaded warmup classes so an attach sees them.
+     * Retransforms already-loaded classes so an attach sees them.
      *
      * <p>Retransformation always re-runs the transformer against the class's <em>original</em>
      * bytes, so this cannot stack a second set of probes on an already-instrumented class.
      */
-    private static void retransformLoadedWarmupClasses(Instrumentation instrumentation) {
-        List<Class<?>> targets = new ArrayList<>();
+    private static void retransformLoadedClasses(Instrumentation instrumentation) {
+        // One class at a time: a batch fails as a whole on the first class the JVM refuses, and a
+        // running application has plenty of classes that cannot be retransformed.
+        int refused = 0;
         for (Class<?> loaded : instrumentation.getAllLoadedClasses()) {
-            if (isRetransformableWarmupClass(instrumentation, loaded)) {
-                targets.add(loaded);
+            if (!isRetransformable(instrumentation, loaded)) {
+                continue;
+            }
+            try {
+                instrumentation.retransformClasses(loaded);
+            } catch (Throwable t) {
+                refused++;
             }
         }
-        if (targets.isEmpty()) {
-            return;
-        }
-        try {
-            instrumentation.retransformClasses(targets.toArray(new Class<?>[0]));
-        } catch (Throwable t) {
-            report("failed to retransform " + targets.size()
-                    + " already-loaded warmup class(es); they are NOT being monitored (" + t + ")");
+        if (refused > 0) {
+            report(refused + " already-loaded class(es) could not be retransformed; they are NOT being recorded");
         }
     }
 
-    private static boolean isRetransformableWarmupClass(Instrumentation instrumentation, Class<?> type) {
+    private static boolean isRetransformable(Instrumentation instrumentation, Class<?> type) {
         try {
-            // Bootstrap classes cannot see the recorder the injected probe calls, so instrumenting
-            // them would only produce NoClassDefFoundError at runtime.
-            if (type.getClassLoader() == null || !instrumentation.isModifiableClass(type)) {
-                return false;
-            }
-            return declaresWarmup(type);
+            // Bootstrap classes cannot see the trace the injected probe calls, so instrumenting
+            // them would only produce NoClassDefFoundError at runtime. The agent's own classes are
+            // left alone for the same reason the transformer leaves them alone.
+            return type.getClassLoader() != null
+                    && instrumentation.isModifiableClass(type)
+                    && !AllocationClassFileTransformer.isAgentClass(type.getName().replace('.', '/'));
         } catch (Throwable t) {
-            // Reflecting over an arbitrary loaded class can fail on its own missing dependencies.
+            // Asking about an arbitrary loaded class can fail on its own missing dependencies.
             // A class we cannot inspect is simply not a candidate.
             return false;
         }
-    }
-
-    private static boolean declaresWarmup(Class<?> type) {
-        if (isWarmupAnnotated(type)) {
-            return true;
-        }
-        for (AnnotatedElement member : type.getDeclaredMethods()) {
-            if (isWarmupAnnotated(member)) {
-                return true;
-            }
-        }
-        for (AnnotatedElement member : type.getDeclaredConstructors()) {
-            if (isWarmupAnnotated(member)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean isWarmupAnnotated(AnnotatedElement element) {
-        return element.isAnnotationPresent(AllocationsForWarmup.class);
     }
 
     private static void report(String message) {

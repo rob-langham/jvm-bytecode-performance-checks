@@ -51,7 +51,7 @@ class InstrumentedBytecodeTest {
     }
 
     private Class<?> instrumentAndLoad(Class<?> fixture) throws Exception {
-        byte[] instrumented = new WarmupInstrumenter(getClass().getClassLoader(), trace.siteCodes())
+        byte[] instrumented = new AllocationInstrumenter(getClass().getClassLoader(), trace.siteCodes())
                 .instrument(originalBytes(fixture));
         assertNotNull(instrumented, () -> fixture + " should have been instrumented");
         return defineInstrumented(fixture, instrumented);
@@ -68,7 +68,7 @@ class InstrumentedBytecodeTest {
             branches.invoke(target, 7);
             branches.invoke(target, 1);
         });
-        assertEquals(3L, trace.total(), "one allocation per branch taken");
+        assertEquals(3L, trace.totalIn("branches"), "one allocation per branch taken");
     }
 
     @Test
@@ -78,7 +78,7 @@ class InstrumentedBytecodeTest {
 
         loaded.getMethod("loop", int.class).invoke(target, 4);
 
-        assertEquals(4L, trace.total(), "the loop body allocates once per iteration");
+        assertEquals(4L, trace.totalIn("loop"), "the loop body allocates once per iteration");
     }
 
     @Test
@@ -91,8 +91,8 @@ class InstrumentedBytecodeTest {
             method.invoke(target, false);
             method.invoke(target, true);
         });
-        assertTrue(trace.total() >= 4,
-                () -> "both the normal and the caught path allocate, plus finally: " + trace.total());
+        assertTrue(trace.totalIn("exceptionHandlers") >= 4,
+                () -> "both the normal and the caught path allocate, plus finally: " + trace.totalIn("exceptionHandlers"));
     }
 
     @Test
@@ -106,7 +106,7 @@ class InstrumentedBytecodeTest {
             method.invoke(target, 1);
             method.invoke(target, 99);
         });
-        assertEquals(3L, trace.total());
+        assertEquals(3L, trace.totalIn("switchStatement"));
     }
 
     @Test
@@ -159,7 +159,7 @@ class InstrumentedBytecodeTest {
     }
 
     @Test
-    void doesNotInstrumentAnOrdinaryMethodJustBecauseAWarmupMethodReferencesIt() throws Exception {
+    void recordsAnOrdinaryMethodReferencedByAWarmupMethodWhenItRuns() throws Exception {
         Class<?> loaded = instrumentAndLoad(ComplexControlFlow.class);
         Object target = loaded.getDeclaredConstructor().newInstance();
 
@@ -167,8 +167,8 @@ class InstrumentedBytecodeTest {
         long afterCreation = trace.total();
         supplier.get();
 
-        assertEquals(afterCreation, trace.total(),
-                "the referenced method is ordinary code with its own contract, not warmup code");
+        assertTrue(trace.total() > afterCreation,
+                "the referenced method is ordinary code: its own allocations are recorded when it runs");
     }
 
     @Test
@@ -205,7 +205,7 @@ class InstrumentedBytecodeTest {
 
     @Test
     void leavesAWarmupMethodWithNoAllocationsUnchanged() {
-        byte[] result = new WarmupInstrumenter(getClass().getClassLoader(), trace.siteCodes())
+        byte[] result = new AllocationInstrumenter(getClass().getClassLoader(), trace.siteCodes())
                 .instrument(originalBytes(WarmupWithoutAllocation.class));
 
         assertNull(result, "nothing to probe means no rewrite, so no cost for the JIT to undo");
@@ -213,7 +213,7 @@ class InstrumentedBytecodeTest {
 
     @Test
     void instrumentingTwiceDoublesTheProbesRatherThanCorruptingTheClass() throws Exception {
-        WarmupInstrumenter instrumenter = new WarmupInstrumenter(getClass().getClassLoader(), trace.siteCodes());
+        AllocationInstrumenter instrumenter = new AllocationInstrumenter(getClass().getClassLoader(), trace.siteCodes());
         byte[] once = instrumenter.instrument(originalBytes(TypeLevelWarmupClass.class));
         byte[] twice = instrumenter.instrument(once);
 
@@ -228,7 +228,7 @@ class InstrumentedBytecodeTest {
     @Test
     void recordsSitesWhenTheClassCarriesNoLineNumberInformation() throws Exception {
         byte[] stripped = stripLineNumbers(originalBytes(TypeLevelWarmupClass.class));
-        byte[] instrumented = new WarmupInstrumenter(getClass().getClassLoader(), trace.siteCodes()).instrument(stripped);
+        byte[] instrumented = new AllocationInstrumenter(getClass().getClassLoader(), trace.siteCodes()).instrument(stripped);
         Class<?> loaded = defineInstrumented(TypeLevelWarmupClass.class, instrumented);
         Object target = loaded.getDeclaredConstructor().newInstance();
         loaded.getMethod("first").invoke(target);
@@ -246,7 +246,8 @@ void distinguishesTwoAllocationsOnTheSameSourceLine() throws Exception {
         loaded.getMethod("sameLine", boolean.class, boolean.class).invoke(target, true, true);
 
         Map<String, Long> sites = trace.counts();
-        long newSites = sites.keySet().stream().filter(k -> k.endsWith(":NEW")).count();
-        assertEquals(2L, newSites, () -> "two distinct NEW sites, got " + sites.keySet());
+        long newSites = sites.keySet().stream()
+                .filter(k -> k.contains("#sameLine:") && k.endsWith(":NEW")).count();
+        assertEquals(2L, newSites, () -> "two distinct NEW sites in sameLine, got " + sites.keySet());
     }
 }

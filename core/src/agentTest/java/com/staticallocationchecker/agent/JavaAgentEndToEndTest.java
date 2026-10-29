@@ -77,14 +77,23 @@ class JavaAgentEndToEndTest {
         List<String> output = runJvmWithAgent(dir);
         assertTrue(output.contains("DONE"), () -> "the harness should finish: " + output);
 
-        List<Integer> codes = new ArrayList<>();
-        AllocationTraceReader.forEachEvent(dir, (code, nanos) -> codes.add(code));
-        assertEquals(1, codes.size(), "the lazy allocation fires once across three calls");
-
+        // Every allocation site in the application is recorded, so the harness's own main() also
+        // appears. The assertions are about the warm() site alone.
         Map<Integer, String> keys = AllocationTraceReader.readKeys(dir);
-        assertEquals(1, keys.size(), () -> "expected exactly one site key: " + keys);
-        assertTrue(keys.get(codes.get(0)).startsWith("com.staticallocationchecker.agent.AgentHarness$Warmup#warm:"),
-                () -> "the key should name the warmup method: " + keys);
+        List<Integer> warmCodes = new ArrayList<>();
+        for (Map.Entry<Integer, String> key : keys.entrySet()) {
+            if (key.getValue().contains("AgentHarness$Warmup#warm:")) {
+                warmCodes.add(key.getKey());
+            }
+        }
+        assertEquals(1, warmCodes.size(), () -> "expected one warm() site: " + keys);
+        List<Integer> warmEvents = new ArrayList<>();
+        AllocationTraceReader.forEachEvent(dir, (code, nanos) -> {
+            if (warmCodes.contains(code)) {
+                warmEvents.add(code);
+            }
+        });
+        assertEquals(1, warmEvents.size(), "the lazy allocation fires once across three calls");
         assertTrue(Files.exists(dir.resolve(AllocationTrace.KEYS_FILE)));
     }
 

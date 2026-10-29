@@ -27,13 +27,18 @@ java -cp $AGENT com.staticallocationchecker.trace.TraceReport build/trace build/
 ## What you should see
 
 ```
-code       count     first ms      last ms  state              site
-0              2        0.000        0.002  steady             demo.PricingEngine#levels
-1            169        0.187     2863.571  STILL ALLOCATING   demo.ResizingCache#scratch
+By contract:
+  warmup          sites    2  events        130  still allocating 1  violations 0
+  unannotated     sites   12  events        133  still allocating 0  violations 0
+
+code       count     first ms      last ms  contract        state              site
+12             1        5.500        5.500  warmup          steady             demo.PricingEngine#levels
+13           129        5.577     2593.068  warmup          STILL ALLOCATING   demo.ResizingCache#scratch
 ```
 
-`PricingEngine#levels` fires twice at the very start and never again, through 16 million operations.
-`ResizingCache#scratch` is still allocating at the end of the run.
+`PricingEngine#levels` fires at the very start and never again, through 16 million operations.
+`ResizingCache#scratch` is still allocating near the end of the run. The other twelve sites are the
+driver's own allocations: counted, not judged, because nothing annotates them.
 
 The count for `levels` is a little more than 1 because the four load threads race through the
 unsynchronised lazy init — another thing the static checker cannot see.
