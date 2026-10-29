@@ -11,9 +11,9 @@ import com.staticallocationchecker.TraceFixture;
 import com.staticallocationchecker.instrument.fixtures.NotWarmup;
 import com.staticallocationchecker.instrument.fixtures.WarmupTarget;
 import com.staticallocationchecker.instrument.fixtures.WarmupWithoutAllocation;
+import java.lang.instrument.ClassFileTransformer;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.lang.instrument.ClassFileTransformer;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -47,8 +47,12 @@ class AllocationClassFileTransformerTest {
     }
 
     private byte[] transform(String internalName, byte[] bytes) {
+        return transform(transformer, internalName, bytes);
+    }
+
+    private byte[] transform(ClassFileTransformer with, String internalName, byte[] bytes) {
         try {
-            return transformer.transform(loader, internalName, null, null, bytes);
+            return with.transform(loader, internalName, null, null, bytes);
         } catch (java.lang.instrument.IllegalClassFormatException e) {
             throw new AssertionError("the transformer must never signal failure to the JVM", e);
         }
@@ -81,6 +85,36 @@ class AllocationClassFileTransformerTest {
         assertNull(transform("com/staticallocationchecker/runtime/AllocationTrace",
                 originalBytes(WarmupTarget.class)),
                 "the recorder must not record its own allocations, or it could recurse");
+    }
+
+    @Test
+    void skipsTheAgentsRootPackageButNotOtherSubpackagesOfIt() {
+        assertNull(transform("com/staticallocationchecker/TypeOracle", originalBytes(WarmupTarget.class)),
+                "the instrumenter's own helpers live in the root package");
+        assertNotNull(transform("com/staticallocationchecker/agent/AgentHarness", originalBytes(WarmupTarget.class)),
+                "an application may live under the same namespace; only the agent's packages are excluded");
+    }
+
+    @Test
+    void skipsJdkLoadersSilently() throws Exception {
+        List<String> diagnostics = new ArrayList<>();
+        ClassFileTransformer reporting = new AllocationClassFileTransformer(trace.trace(), diagnostics::add);
+        ClassLoader jdk = ClassLoader.getSystemClassLoader().getParent();
+
+        assertNull(reporting.transform(jdk, "demo/WarmupTarget", null, null, originalBytes(WarmupTarget.class)));
+        assertTrue(diagnostics.isEmpty(),
+                () -> "a JDK loader never sees the agent, so warning about it is noise: " + diagnostics);
+    }
+
+    @Test
+    void skipsQuietlyOnceTheTraceIsClosed() throws Exception {
+        List<String> diagnostics = new ArrayList<>();
+        ClassFileTransformer reporting = new AllocationClassFileTransformer(trace.trace(), diagnostics::add);
+        trace.trace().close();
+
+        assertNull(transform(reporting, "demo/WarmupTarget", originalBytes(WarmupTarget.class)),
+                "classes loaded during shutdown are not instrumented once nothing more can be recorded");
+        assertTrue(diagnostics.isEmpty(), () -> "shutdown is not a failure to report: " + diagnostics);
     }
 
     @Test

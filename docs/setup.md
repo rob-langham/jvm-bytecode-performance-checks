@@ -330,8 +330,12 @@ it decides how a site is judged:
 | --- | --- |
 | `warmup` | `steady`, or `STILL ALLOCATING` if it fires near the end of the run |
 | `zero-allocation` | `VIOLATION` if it fires at all |
+| `conflicting` | Both annotations on one method. Counted, not judged: the checker reports it |
 | `unannotated` | Counted, not judged |
-| `unknown` | Its class was not in the directories given to the report |
+| `unknown` | Its class or method was not in the directories given, or its overload could not be told apart |
+
+The contract is resolved by the static checker itself, so a site is held to exactly what the checker
+holds its method to, including a contract inherited from an annotated interface or superclass.
 
 {: .note }
 > Use the **agent** jar, not the library jar. A `-javaagent` jar is appended to the system class

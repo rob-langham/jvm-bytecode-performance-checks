@@ -3,6 +3,11 @@ package com.staticallocationchecker.instrument;
 import com.staticallocationchecker.AllocationCategory;
 import com.staticallocationchecker.Allocations;
 import com.staticallocationchecker.TypeOracle;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Set;
 import java.util.function.ToIntFunction;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
@@ -10,7 +15,9 @@ import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FrameNode;
 import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.LineNumberNode;
 import org.objectweb.asm.tree.MethodInsnNode;
@@ -28,7 +35,9 @@ import org.objectweb.asm.tree.MethodNode;
  * {@code LDC code; INVOKESTATIC recordSite(int)} pair is inserted before the allocating instruction.
  * The {@code code} is a small integer assigned by the trace, which also records the site key it
  * stands for. Because the insertion is balanced within its basic block, the existing stack-map
- * frames stay valid and only {@code maxStack} needs recomputing.
+ * frames stay valid and only {@code maxStack} needs recomputing - with one exception, handled by
+ * {@link #keepUninitializedOnTheNew}: a frame can name an object under construction by the offset of
+ * its {@code NEW}, and the probe must not take that offset.
  */
 public final class AllocationInstrumenter {
 
@@ -95,9 +104,60 @@ public final class AllocationInstrumenter {
             probe.add(new LdcInsnNode(siteCodes.applyAsInt(key)));
             probe.add(new MethodInsnNode(
                     Opcodes.INVOKESTATIC, RECORDER, "recordSite", "(I)V", false));
+            AbstractInsnNode probeStart = probe.getFirst();
             method.instructions.insertBefore(insn, probe);
+            if (insn.getOpcode() == Opcodes.NEW) {
+                keepUninitializedOnTheNew(method, probeStart, insn);
+            }
             changed = true;
         }
         return changed;
+    }
+
+    /**
+     * Re-points frames that name an uninitialized object at its {@code NEW}, not at the probe.
+     *
+     * <p>When a branch sits between {@code NEW} and the constructor call - {@code new Holder(flag ? a : b)}
+     * - the stack-map frame at the branch target records the object as {@code Uninitialized(offset)},
+     * where {@code offset} must be the offset of the {@code NEW}. ASM marks that offset with a label just
+     * before the {@code NEW}, and the probe was inserted after the label, so the label now marks the
+     * probe and the JVM rejects the class with a {@code ClassFormatError}.
+     *
+     * <p>The labels are left where they are, since jumps that land on them should still run the probe.
+     * Instead a new label goes directly before the {@code NEW}, and only frame entries are moved to it.
+     */
+    private static void keepUninitializedOnTheNew(MethodNode method, AbstractInsnNode probeStart,
+                                                  AbstractInsnNode newInsn) {
+        Set<LabelNode> atNew = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (AbstractInsnNode node = probeStart.getPrevious(); node != null && node.getOpcode() < 0;
+                node = node.getPrevious()) {
+            if (node instanceof LabelNode) {
+                atNew.add((LabelNode) node);
+            }
+        }
+        if (atNew.isEmpty()) {
+            return;
+        }
+        LabelNode newLabel = new LabelNode();
+        method.instructions.insertBefore(newInsn, newLabel);
+        for (AbstractInsnNode node : method.instructions) {
+            if (node instanceof FrameNode) {
+                retarget(((FrameNode) node).local, atNew, newLabel);
+                retarget(((FrameNode) node).stack, atNew, newLabel);
+            }
+        }
+    }
+
+    /** In a frame's types, a {@link LabelNode} means "uninitialized, created at this label". */
+    private static void retarget(List<Object> types, Set<LabelNode> from, LabelNode to) {
+        if (types == null) {
+            return;
+        }
+        for (ListIterator<Object> it = types.listIterator(); it.hasNext(); ) {
+            Object type = it.next();
+            if (type instanceof LabelNode && from.contains(type)) {
+                it.set(to);
+            }
+        }
     }
 }

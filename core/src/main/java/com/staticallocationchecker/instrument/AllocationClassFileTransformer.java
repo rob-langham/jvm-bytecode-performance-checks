@@ -17,13 +17,16 @@ import java.util.function.Consumer;
  * <p>Per the transformer contract it returns null when the class is unchanged, and it never throws
  * (a thrown transformer would abort class loading), degrading to "no transformation" on any error.
  *
- * <p>Three kinds of class are left alone, because instrumenting them would break the recorder
- * rather than measure the program:
+ * <p>Some classes are left alone, because instrumenting them would break the recorder rather than
+ * measure the program:
  *
  * <ul>
- *   <li>bootstrap classes (null loader), which cannot see the trace the probe calls;</li>
- *   <li>classes from loaders that cannot see the trace either, which would fail at their first probe;</li>
+ *   <li>JDK classes - the bootstrap loader (null) and its platform or extension loader - which cannot
+ *       see the trace the probe calls. They are skipped silently: they are never the application.</li>
+ *   <li>classes from any other loader that cannot see the trace, which would fail at their first
+ *       probe. Those are reported, because they may well be application classes.</li>
  *   <li>the agent's own classes, which would otherwise record their own work and could recurse.</li>
+ *   <li>anything loaded after the trace is closed, during shutdown, since nothing more is recorded.</li>
  * </ul>
  *
  * <p>It does say so when it declines a loader. A transformer that fails silently is indistinguishable
@@ -43,13 +46,18 @@ final class AllocationClassFileTransformer implements ClassFileTransformer {
         "com/staticallocationchecker/instrument/",
         "com/staticallocationchecker/trace/",
         "com/staticallocationchecker/shaded/",
+        "com/staticallocationchecker/annotations/",
     };
+
+    /** The root package, whose classes ({@code TypeOracle}, {@code Allocations}, ...) the instrumenter uses. */
+    private static final String AGENT_ROOT = "com/staticallocationchecker/";
 
     private final AllocationTrace trace;
     private final Consumer<String> diagnostics;
     private final Set<String> reported = ConcurrentHashMap.newKeySet();
     private final Map<ClassLoader, Boolean> recorderVisible =
             Collections.synchronizedMap(new WeakHashMap<>());
+    private final Set<ClassLoader> jdkLoaders = jdkLoaders();
 
     AllocationClassFileTransformer(AllocationTrace trace) {
         this(trace, message -> System.err.println("static-allocation-checker: " + message));
@@ -67,7 +75,8 @@ final class AllocationClassFileTransformer implements ClassFileTransformer {
             Class<?> classBeingRedefined,
             ProtectionDomain protectionDomain,
             byte[] classfileBuffer) {
-        if (loader == null || className == null || isAgentClass(className) || !recorderVisible(loader)) {
+        if (loader == null || jdkLoaders.contains(loader) || className == null || trace.isClosed()
+                || isAgentClass(className) || !recorderVisible(loader)) {
             return null;
         }
         try {
@@ -85,7 +94,20 @@ final class AllocationClassFileTransformer implements ClassFileTransformer {
                 return true;
             }
         }
-        return false;
+        // Classes directly in the root package, but not its other subpackages, which may be anyone's.
+        return internalName.startsWith(AGENT_ROOT) && internalName.indexOf('/', AGENT_ROOT.length()) < 0;
+    }
+
+    /**
+     * The loaders above the system class loader: the platform loader on Java 9+, the extension loader
+     * on Java 8. They define JDK classes only, and can never see the trace on the class path.
+     */
+    private static Set<ClassLoader> jdkLoaders() {
+        Set<ClassLoader> loaders = Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        for (ClassLoader l = ClassLoader.getSystemClassLoader().getParent(); l != null; l = l.getParent()) {
+            loaders.add(l);
+        }
+        return loaders;
     }
 
     /**

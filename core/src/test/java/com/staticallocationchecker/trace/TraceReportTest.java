@@ -2,11 +2,15 @@ package com.staticallocationchecker.trace;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.staticallocationchecker.instrument.AllocationInstrumenter;
+import com.staticallocationchecker.instrument.fixtures.Overloads;
 import com.staticallocationchecker.instrument.fixtures.WarmupTarget;
 import com.staticallocationchecker.runtime.AllocationTrace;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
@@ -145,6 +149,66 @@ class TraceReportTest {
 
         assertTrue(report.contains("Events: 8 over"), report);
         assertTrue(row(report, 0, 1, 1, 0, "unknown", "-"), () -> "no contract can be read:\n" + report);
+    }
+
+    /** One steady-state event per key, with no warm-up, reported against the fixture classes. */
+    private String reportOn(String... keys) throws Exception {
+        AllocationTrace trace = AllocationTrace.open(dir, 0L, () -> 100L);
+        for (String key : keys) {
+            trace.record(trace.siteCode(key));
+        }
+        trace.close();
+        return TraceReport.render(dir, List.of(fixtureClasses()));
+    }
+
+    private static final String SEMANTICS = "com.staticallocationchecker.fixtures.AnnotationSemantics$";
+
+    @Test
+    void aSiteIsHeldToAContractItsMethodInheritsFromAnInterface() throws Exception {
+        String report = reportOn(SEMANTICS + "UnannotatedImplementation#handle:1@0:NEW");
+
+        assertTrue(row(report, 0, 1, 0, 1, "zero-allocation", "VIOLATION"),
+                () -> "the interface's @ZeroAllocations binds the implementation, as it does for the checker:\n" + report);
+    }
+
+    @Test
+    void aSiteUnderConflictingContractsIsCountedNotJudged() throws Exception {
+        String report = reportOn(SEMANTICS + "BothOnOneMethod#entry:1@0:NEW");
+
+        assertTrue(row(report, 0, 1, 0, 1, "conflicting", "-"), report);
+        assertTrue(report.contains("conflicting: both @ZeroAllocations and @AllocationsForWarmup"), report);
+    }
+
+    @Test
+    void aMethodLevelContractInsideATypeLevelOneFollowsTheChecker() throws Exception {
+        String report = reportOn(
+                SEMANTICS + "WarmupMethodInZeroAllocationType#warm:1@0:NEW",
+                SEMANTICS + "WarmupMethodInZeroAllocationType#hot:1@0:NEW");
+
+        assertTrue(row(report, 0, 1, 0, 1, "warmup", "STILL ALLOCATING"), report);
+        assertTrue(row(report, 1, 1, 0, 1, "zero-allocation", "VIOLATION"), report);
+    }
+
+    @Test
+    void overloadsAreToldApartByTheSiteLine() throws Exception {
+        // Real keys, with the compiler's line numbers, from instrumenting the fixture.
+        List<String> keys = new ArrayList<>();
+        try (InputStream in = Overloads.class.getResourceAsStream("Overloads.class")) {
+            new AllocationInstrumenter(getClass().getClassLoader(), key -> {
+                keys.add(key);
+                return keys.size() - 1;
+            }).instrument(in.readAllBytes());
+        }
+        String zeroOverload = keys.stream().filter(k -> k.endsWith(":NEW_ARRAY")).findFirst().orElseThrow();
+        String plainOverload = keys.stream().filter(k -> k.endsWith(":NEW")).findFirst().orElseThrow();
+        String noLine = PKG + "Overloads#make:-1@0:NEW";
+
+        String report = reportOn(zeroOverload, plainOverload, noLine);
+
+        assertTrue(row(report, 0, 1, 0, 1, "zero-allocation", "VIOLATION"), () -> "make(int):\n" + report);
+        assertTrue(row(report, 1, 1, 0, 1, "unannotated", "-"), () -> "make(String):\n" + report);
+        assertTrue(row(report, 2, 1, 0, 1, "unknown", "-"), () -> "no line to choose by:\n" + report);
+        assertTrue(report.contains("ambiguous: 2 overloads of make"), report);
     }
 
     @Test

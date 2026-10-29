@@ -10,6 +10,7 @@ import com.staticallocationchecker.TraceFixture;
 import com.staticallocationchecker.instrument.fixtures.EagerWarmup;
 import com.staticallocationchecker.instrument.fixtures.MixedWarmup;
 import com.staticallocationchecker.instrument.fixtures.WarmupWithoutAllocation;
+import com.staticallocationchecker.runtime.AllocationTraceReader;
 import com.staticallocationchecker.instrument.fixtures.WarmupKinds;
 import com.staticallocationchecker.instrument.fixtures.WarmupTarget;
 import java.nio.file.Path;
@@ -109,11 +110,13 @@ class AllocationInstrumenterTest {
     @Test
     void theSameSiteKeyAlwaysGetsTheSameCode() throws Exception {
         instrumenter().instrument(originalBytes(WarmupTarget.class));
-        Set<String> first = trace.assignedKeys();
+        Map<Integer, String> first = AllocationTraceReader.readKeys(dir);
 
         instrumenter().instrument(originalBytes(WarmupTarget.class));
 
-        assertEquals(first, trace.assignedKeys(),
+        // Compared as code -> key, not as a set of keys: a second code for the same key would be a
+        // second line in the key file, and a set would collapse it and hide the bug.
+        assertEquals(first, AllocationTraceReader.readKeys(dir),
                 "re-instrumenting (as retransformation does) must not invent new codes");
     }
 }

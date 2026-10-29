@@ -1,6 +1,7 @@
 package com.staticallocationchecker.trace;
 
 import com.staticallocationchecker.AllocationChecker;
+import com.staticallocationchecker.Contract;
 import com.staticallocationchecker.Finding;
 import com.staticallocationchecker.runtime.AllocationTraceReader;
 import java.io.IOException;
@@ -17,8 +18,9 @@ import java.util.OptionalLong;
 import java.util.TreeMap;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.tree.AnnotationNode;
+import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.LineNumberNode;
 import org.objectweb.asm.tree.MethodNode;
 
 /**
@@ -27,16 +29,20 @@ import org.objectweb.asm.tree.MethodNode;
  *
  * <p>The trace starts with a <em>warm-up period</em>, which the agent records. Allocations in it are
  * expected: classes load, caches fill, buffers grow to their working size. Only allocations after the
- * warm-up period count as steady state, and what they mean depends on the contract the site is under,
- * read from the bytecode:
+ * warm-up period count as steady state, and what they mean depends on the contract the site is under.
+ * That contract is resolved by {@link AllocationChecker#contracts}, so a site is held to exactly what the
+ * static checker holds its method to - declared, type-level or inherited from a supertype:
  *
  * <ul>
  *   <li>{@code warmup} - an {@code @AllocationsForWarmup} method (or type). It is {@code steady} if it
  *       makes no allocations after warm-up, and {@code STILL ALLOCATING} if it does.</li>
  *   <li>{@code zero-allocation} - a {@code @ZeroAllocations} method (or type). Allocating after warm-up
  *       is a {@code VIOLATION}. During warm-up it is {@code warm-up only}, which is allowed.</li>
+ *   <li>{@code conflicting} - both annotations on one method. The checker reports that as a mistake in
+ *       the declaration, so the site is counted, not judged.</li>
  *   <li>{@code unannotated} - no contract applies. The site is reported with its counts, not judged.</li>
- *   <li>{@code unknown} - the class was not among the directories given, so its annotations cannot be read.</li>
+ *   <li>{@code unknown} - the class or method was not among the directories given, or several overloads
+ *       share the name and the site's line does not say which, so its contract cannot be read.</li>
  * </ul>
  *
  * <p>Usage: {@code TraceReport <trace-directory> [classes-directory...]}. Without class directories the
@@ -44,20 +50,31 @@ import org.objectweb.asm.tree.MethodNode;
  */
 public final class TraceReport {
 
-    private static final String WARMUP = "Lcom/staticallocationchecker/annotations/AllocationsForWarmup;";
-    private static final String ZERO = "Lcom/staticallocationchecker/annotations/ZeroAllocations;";
-
-    /** The contract a site falls under, from its bytecode. */
-    enum Contract {
+    /** The contract a site falls under, as the report labels it. */
+    enum SiteContract {
         WARMUP("warmup"),
         ZERO_ALLOCATIONS("zero-allocation"),
+        CONFLICTING("conflicting"),
         UNANNOTATED("unannotated"),
         UNKNOWN("unknown");
 
         final String label;
 
-        Contract(String label) {
+        SiteContract(String label) {
             this.label = label;
+        }
+
+        static SiteContract of(Contract contract) {
+            switch (contract) {
+                case WARMUP:
+                    return WARMUP;
+                case ZERO_ALLOCATIONS:
+                    return ZERO_ALLOCATIONS;
+                case CONFLICTING:
+                    return CONFLICTING;
+                default:
+                    return UNANNOTATED;
+            }
         }
     }
 
@@ -105,14 +122,14 @@ public final class TraceReport {
         } else if (warmupEnd.isPresent()) {
             out.append("Warm-up had already ended before the first allocation: every event is steady state.\n\n");
         } else {
-            out.append("No warm-up period was recorded (warmup=0): every event counts as steady state.\n\n");
+            out.append("No warm-up period was recorded: every event counts as steady state.\n\n");
         }
 
         Bytecode bytecode = new Bytecode(classRoots);
-        Map<Contract, long[]> totals = new EnumMap<>(Contract.class);
-        Map<Contract, Integer> sites = new EnumMap<>(Contract.class);
-        Map<Contract, Integer> stillAllocating = new EnumMap<>(Contract.class);
-        Map<Contract, Integer> violations = new EnumMap<>(Contract.class);
+        Map<SiteContract, long[]> totals = new EnumMap<>(SiteContract.class);
+        Map<SiteContract, Integer> sites = new EnumMap<>(SiteContract.class);
+        Map<SiteContract, Integer> stillAllocating = new EnumMap<>(SiteContract.class);
+        Map<SiteContract, Integer> violations = new EnumMap<>(SiteContract.class);
 
         StringBuilder rows = new StringBuilder();
         StringBuilder details = new StringBuilder();
@@ -120,7 +137,8 @@ public final class TraceReport {
             int code = entry.getKey();
             Tally tally = entry.getValue();
             String key = keys.get(code);
-            Contract contract = key == null ? Contract.UNKNOWN : bytecode.contractOf(key);
+            Bytecode.Resolution resolution = key == null ? null : bytecode.resolve(key);
+            SiteContract contract = resolution == null ? SiteContract.UNKNOWN : resolution.contract;
             String state = stateOf(contract, tally);
 
             long[] sum = totals.computeIfAbsent(contract, c -> new long[2]);
@@ -143,13 +161,13 @@ public final class TraceReport {
                 continue;
             }
             details.append(String.format("  %d  %s%n", code, key));
-            details.append("      contract: ").append(bytecode.describe(key)).append('\n');
+            details.append("      contract: ").append(resolution.description).append('\n');
             details.append("      static findings on this method: ")
                     .append(bytecode.findingsOn(key)).append('\n');
         }
 
         out.append("By contract:\n");
-        for (Contract contract : Contract.values()) {
+        for (SiteContract contract : SiteContract.values()) {
             if (!sites.containsKey(contract)) {
                 continue;
             }
@@ -169,7 +187,7 @@ public final class TraceReport {
     }
 
     /** What a site's events say, given the contract it is under. */
-    static String stateOf(Contract contract, Tally tally) {
+    static String stateOf(SiteContract contract, Tally tally) {
         switch (contract) {
             case WARMUP:
                 return tally.steady == 0 ? "steady" : "STILL ALLOCATING";
@@ -209,60 +227,100 @@ public final class TraceReport {
     }
 
     /**
-     * The bytecode side of the report: the annotations on each site's method and class, and the
-     * checker's findings. Classes are read lazily, so a report over a trace with no class directories
-     * does no analysis.
+     * The bytecode side of the report: the contract each site's method is held to, and the checker's
+     * findings. Both come from {@link AllocationChecker}, so the report and the static check cannot
+     * disagree about what a method was promised.
      */
-    private static final class Bytecode {
+    static final class Bytecode {
+
+        /** A site's contract, and a sentence saying why, for the details section. */
+        static final class Resolution {
+            final SiteContract contract;
+            final String description;
+
+            Resolution(SiteContract contract, String description) {
+                this.contract = contract;
+                this.description = description;
+            }
+        }
+
         private final List<Path> roots;
         private final Map<String, ClassNode> classes = new HashMap<>();
+        private final Map<String, Resolution> resolved = new HashMap<>();
+        private final Map<String, Contract> contracts = new HashMap<>();
         private final Map<String, Integer> findings = new HashMap<>();
 
-        Bytecode(List<Path> roots) throws IOException {
+        Bytecode(List<Path> roots) {
             this.roots = roots;
             if (!roots.isEmpty()) {
-                for (Finding finding : new AllocationChecker().analyze(roots, Collections.emptyList())
-                        .findings()) {
+                AllocationChecker checker = new AllocationChecker();
+                contracts.putAll(checker.contracts(roots, Collections.emptyList()));
+                for (Finding finding : checker.analyze(roots, Collections.emptyList()).findings()) {
                     findings.merge(finding.className() + "#" + finding.methodName(), 1, Integer::sum);
                 }
             }
         }
 
-        /** The contract that governs the method a site key names. */
-        Contract contractOf(String key) {
-            String[] site = parse(key);
-            ClassNode owner = classNode(site[0]);
-            if (owner == null) {
-                return Contract.UNKNOWN;
-            }
-            MethodNode method = method(owner, site[1]);
-            if (method == null) {
-                return Contract.UNKNOWN;
-            }
-            // A method-level annotation is more specific than a type-level one, so it wins.
-            Contract own = contractOf(method.visibleAnnotations);
-            if (own != Contract.UNANNOTATED) {
-                return own;
-            }
-            return contractOf(owner.visibleAnnotations);
+        /** The contract of the method a site key names. */
+        Resolution resolve(String key) {
+            return resolved.computeIfAbsent(key, this::resolveUncached);
         }
 
-        /** A sentence saying what the contract is and why, for the details section. */
-        String describe(String key) {
-            String[] site = parse(key);
-            ClassNode owner = classNode(site[0]);
+        private Resolution resolveUncached(String key) {
+            Site site = Site.parse(key);
+            ClassNode owner = classNode(site.className);
             if (owner == null) {
-                return "class not found in the given directories";
+                return new Resolution(SiteContract.UNKNOWN, "class not found in the given directories");
             }
-            MethodNode method = method(owner, site[1]);
+            List<MethodNode> named = new ArrayList<>();
+            for (MethodNode method : owner.methods) {
+                if (method.name.equals(site.methodName)) {
+                    named.add(method);
+                }
+            }
+            if (named.isEmpty()) {
+                return new Resolution(SiteContract.UNKNOWN, "method not found in class");
+            }
+            MethodNode method = named.size() == 1 ? named.get(0) : overloadContaining(named, site.line);
             if (method == null) {
-                return "method not found in class";
+                return new Resolution(SiteContract.UNKNOWN, "ambiguous: " + named.size()
+                        + " overloads of " + site.methodName + ", and line " + site.line + " does not pick one");
             }
-            switch (contractOf(key)) {
+            Contract contract = contracts.get(site.className + "#" + method.name + method.desc);
+            if (contract == null) {
+                return new Resolution(SiteContract.UNKNOWN, "method not analysed");
+            }
+            return new Resolution(SiteContract.of(contract), describe(contract, method));
+        }
+
+        /** The one overload whose line table contains {@code line}, or null if not exactly one. */
+        private static MethodNode overloadContaining(List<MethodNode> overloads, int line) {
+            if (line < 0) {
+                return null;
+            }
+            MethodNode match = null;
+            for (MethodNode method : overloads) {
+                for (AbstractInsnNode insn : method.instructions) {
+                    if (insn instanceof LineNumberNode && ((LineNumberNode) insn).line == line) {
+                        if (match != null && match != method) {
+                            return null;
+                        }
+                        match = method;
+                        break;
+                    }
+                }
+            }
+            return match;
+        }
+
+        private static String describe(Contract contract, MethodNode method) {
+            switch (contract) {
                 case WARMUP:
                     return "@AllocationsForWarmup";
                 case ZERO_ALLOCATIONS:
                     return "@ZeroAllocations";
+                case CONFLICTING:
+                    return "conflicting: both @ZeroAllocations and @AllocationsForWarmup on one method";
                 default:
                     return (method.access & Opcodes.ACC_SYNTHETIC) != 0
                             ? "unannotated (synthetic lambda body)"
@@ -272,25 +330,11 @@ public final class TraceReport {
 
         /** How many findings the checker reports against the method a site key names. */
         int findingsOn(String key) {
-            String[] site = parse(key);
-            return findings.getOrDefault(site[0] + "#" + site[1], 0);
+            Site site = Site.parse(key);
+            return findings.getOrDefault(site.className + "#" + site.methodName, 0);
         }
 
-        private static Contract contractOf(List<AnnotationNode> annotations) {
-            if (annotations == null) {
-                return Contract.UNANNOTATED;
-            }
-            for (AnnotationNode annotation : annotations) {
-                if (WARMUP.equals(annotation.desc)) {
-                    return Contract.WARMUP;
-                }
-                if (ZERO.equals(annotation.desc)) {
-                    return Contract.ZERO_ALLOCATIONS;
-                }
-            }
-            return Contract.UNANNOTATED;
-        }
-
+        /** Reads a class from the roots, with its code, since overloads are told apart by line. */
         private ClassNode classNode(String binaryName) {
             if (classes.containsKey(binaryName)) {
                 return classes.get(binaryName);
@@ -302,7 +346,7 @@ public final class TraceReport {
                 if (Files.isRegularFile(file)) {
                     node = new ClassNode();
                     try {
-                        new ClassReader(Files.readAllBytes(file)).accept(node, ClassReader.SKIP_CODE);
+                        new ClassReader(Files.readAllBytes(file)).accept(node, ClassReader.SKIP_FRAMES);
                     } catch (IOException e) {
                         node = null;
                     }
@@ -312,26 +356,26 @@ public final class TraceReport {
             classes.put(binaryName, node);
             return node;
         }
+    }
 
-        /** Prefers an annotated overload, since a site key does not carry a descriptor. */
-        private static MethodNode method(ClassNode owner, String name) {
-            MethodNode match = null;
-            for (MethodNode method : owner.methods) {
-                if (method.name.equals(name)) {
-                    if (contractOf(method.visibleAnnotations) != Contract.UNANNOTATED) {
-                        return method;
-                    }
-                    match = match == null ? method : match;
-                }
-            }
-            return match;
+    /** A site key, {@code class#method:line@offset:CATEGORY}, taken apart. */
+    static final class Site {
+        final String className;
+        final String methodName;
+        final int line;
+
+        private Site(String className, String methodName, int line) {
+            this.className = className;
+            this.methodName = methodName;
+            this.line = line;
         }
 
-        /** Splits {@code class#method:line@offset:CATEGORY} into {@code [class, method]}. */
-        private static String[] parse(String key) {
+        static Site parse(String key) {
             int hash = key.indexOf('#');
             int colon = key.indexOf(':', hash);
-            return new String[] {key.substring(0, hash), key.substring(hash + 1, colon)};
+            int at = key.indexOf('@', colon);
+            return new Site(key.substring(0, hash), key.substring(hash + 1, colon),
+                    Integer.parseInt(key.substring(colon + 1, at)));
         }
     }
 }

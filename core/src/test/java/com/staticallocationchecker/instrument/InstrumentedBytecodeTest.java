@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.staticallocationchecker.instrument.fixtures.ComplexControlFlow;
 import com.staticallocationchecker.instrument.fixtures.TypeLevelWarmupClass;
+import com.staticallocationchecker.instrument.fixtures.UninitializedAcrossBranch;
 import com.staticallocationchecker.instrument.fixtures.WarmupWithoutAllocation;
 import com.staticallocationchecker.TraceFixture;
 import java.lang.reflect.Method;
@@ -69,6 +70,29 @@ class InstrumentedBytecodeTest {
             branches.invoke(target, 1);
         });
         assertEquals(3L, trace.totalIn("branches"), "one allocation per branch taken");
+    }
+
+    @Test
+    void aNewWhoseConstructorArgumentBranchesStillVerifies() throws Exception {
+        // Before the fix this class failed to load: the probe took the offset that the frame's
+        // Uninitialized(...) entry must give to the NEW, and the JVM threw ClassFormatError.
+        Class<?> loaded = instrumentAndLoad(UninitializedAcrossBranch.class);
+        Object target = loaded.getDeclaredConstructor().newInstance();
+        Method make = loaded.getMethod("make", boolean.class);
+
+        make.invoke(target, true);
+        make.invoke(target, false);
+
+        assertEquals(2L, trace.totalIn("make"), "one Holder per call, whichever branch the argument took");
+    }
+
+    @Test
+    void aNewWithABranchingArgumentInsideALoopCountsEveryIteration() throws Exception {
+        Class<?> loaded = instrumentAndLoad(UninitializedAcrossBranch.class);
+        Object target = loaded.getDeclaredConstructor().newInstance();
+
+        assertEquals(4, loaded.getMethod("loop", int.class).invoke(target, 4));
+        assertEquals(4L, trace.totalIn("loop"), "the backward jump still lands on the probe");
     }
 
     @Test

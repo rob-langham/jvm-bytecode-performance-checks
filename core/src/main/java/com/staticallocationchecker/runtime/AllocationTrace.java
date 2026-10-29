@@ -159,6 +159,11 @@ public final class AllocationTrace implements Closeable {
         }
     }
 
+    /** Whether {@link #close()} has been called. Nothing more is recorded once it has. */
+    public boolean isClosed() {
+        return closed;
+    }
+
     /** Records one allocation at the site with {@code code}, stamped with the current clock. */
     public void record(int code) {
         if (closed) {

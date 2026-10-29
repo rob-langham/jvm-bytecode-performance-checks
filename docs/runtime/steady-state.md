@@ -181,6 +181,7 @@ unsynchronised lazy init.
 | `STILL ALLOCATING` after warm-up | Not a warmup site. The guard depends on runtime values. |
 | `zero-allocation` with `VIOLATION` | Allocated after warm-up under `@ZeroAllocations`. |
 | `zero-allocation` with `warm-up only` | Allocated only during warm-up, which the contract allows. |
+| `conflicting` | Both annotations on one method. The checker reports the declaration; the trace does not judge it. |
 | A few events at the start, matching your thread count | Racy lazy init. Benign or not, it is doing N× the work. |
 | A site you expected is missing from the report | Either that path never ran, or the class was loaded before the agent arrived. |
 | A site is `STILL ALLOCATING` but is cheap per event | Worth knowing even if the rate is low; a steady trickle still builds up. |
