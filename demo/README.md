@@ -26,7 +26,7 @@ described.
 Then the runtime one, which needs a real JVM with the agent attached:
 
 ```bash
-./gradlew -p demo :07-runtime-flight-recorder:run
+./gradlew -p demo :07-runtime-flight-recorder:verifyRun
 ```
 
 ## The scenarios
@@ -109,7 +109,7 @@ so there is nothing else to invoke.
 
 The scenario POMs have no parent — each repeats its own coordinates, compiler settings and plugin
 block, for the same reason the Gradle files do: one file, whole story, copyable as it stands. The
-runtime half of scenario 07 (`-javaagent` plus `run`) is Gradle-only; Maven builds it and runs the
+runtime half of scenario 07 (`-javaagent` plus `verifyRun`) is Gradle-only; Maven builds it and runs the
 static check, which passes.
 
 ## Two things the output will show you

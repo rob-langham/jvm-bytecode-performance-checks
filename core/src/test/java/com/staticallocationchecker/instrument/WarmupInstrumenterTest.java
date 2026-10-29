@@ -6,42 +6,44 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.staticallocationchecker.TraceFixture;
 import com.staticallocationchecker.instrument.fixtures.EagerWarmup;
 import com.staticallocationchecker.instrument.fixtures.MixedWarmup;
 import com.staticallocationchecker.instrument.fixtures.NotWarmup;
 import com.staticallocationchecker.instrument.fixtures.WarmupKinds;
 import com.staticallocationchecker.instrument.fixtures.WarmupTarget;
-import com.staticallocationchecker.runtime.AllocationFlightRecorder;
-import com.staticallocationchecker.runtime.SiteRecord;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class WarmupInstrumenterTest {
 
-    private AllocationFlightRecorder recorder;
-    private AllocationFlightRecorder previous;
+    @TempDir
+    Path dir;
+
+    private TraceFixture trace;
 
     @BeforeEach
-    void installRecorder() {
-        previous = AllocationFlightRecorder.instance();
-        recorder = new AllocationFlightRecorder(() -> 1_000L);
-        AllocationFlightRecorder.install(recorder);
+    void installTrace() throws Exception {
+        trace = new TraceFixture(dir);
     }
 
     @AfterEach
-    void restoreRecorder() {
-        // The recorder is process-wide static state; leaving a test's recorder installed makes
-        // every later test in the JVM order-dependent.
-        AllocationFlightRecorder.install(previous);
+    void closeTrace() throws Exception {
+        trace.close();
+    }
+
+    private WarmupInstrumenter instrumenter() {
+        return new WarmupInstrumenter(getClass().getClassLoader(), trace.siteCodes());
     }
 
     private Object instrumentAndInvoke(Class<?> fixture, String method) throws Exception {
-        byte[] instrumented = new WarmupInstrumenter(getClass().getClassLoader())
-                .instrument(originalBytes(fixture));
+        byte[] instrumented = instrumenter().instrument(originalBytes(fixture));
         Class<?> loaded = defineInstrumented(fixture, instrumented);
         Object target = loaded.getDeclaredConstructor().newInstance();
         return loaded.getMethod(method).invoke(target);
@@ -51,19 +53,18 @@ class WarmupInstrumenterTest {
     void recordsAllocationInWarmupMethod() throws Exception {
         instrumentAndInvoke(WarmupTarget.class, "warm");
 
-        assertEquals(1L, recorder.total());
-        Map<String, SiteRecord> sites = recorder.snapshot();
-        String key = sites.keySet().iterator().next();
+        Map<String, Long> counts = trace.counts();
+        assertEquals(1, counts.size(), () -> "one site should have fired: " + counts);
+        String key = counts.keySet().iterator().next();
         assertTrue(key.startsWith("com.staticallocationchecker.instrument.fixtures.WarmupTarget#warm:"),
                 () -> "unexpected site key: " + key);
         assertTrue(key.endsWith(":NEW"), () -> "unexpected category in key: " + key);
-        assertEquals(1L, sites.get(key).count());
+        assertEquals(1L, counts.get(key));
     }
 
     @Test
     void leavesClassesWithoutWarmupMethodsUnchanged() {
-        byte[] result = new WarmupInstrumenter(getClass().getClassLoader())
-                .instrument(originalBytes(NotWarmup.class));
+        byte[] result = instrumenter().instrument(originalBytes(NotWarmup.class));
         assertNull(result, "a class with no warmup methods should not be rewritten");
     }
 
@@ -71,18 +72,17 @@ class WarmupInstrumenterTest {
     void doesNotInstrumentNonWarmupMethods() throws Exception {
         instrumentAndInvoke(MixedWarmup.class, "hot");
 
-        assertEquals(0L, recorder.total(), "allocations in ordinary methods must not be recorded");
+        assertEquals(0L, trace.total(), "allocations in ordinary methods must not be recorded");
     }
 
     @Test
     void recordsEveryAllocationCategoryButNotExceptions() throws Exception {
-        byte[] instrumented = new WarmupInstrumenter(getClass().getClassLoader())
-                .instrument(originalBytes(WarmupKinds.class));
+        byte[] instrumented = instrumenter().instrument(originalBytes(WarmupKinds.class));
         Class<?> loaded = defineInstrumented(WarmupKinds.class, instrumented);
         Object target = loaded.getDeclaredConstructor().newInstance();
         loaded.getMethod("warm", int.class, StringBuilder.class).invoke(target, 3, new StringBuilder());
 
-        Set<String> categories = recorder.snapshot().keySet().stream()
+        Set<String> categories = trace.firedKeys().stream()
                 .map(key -> key.substring(key.lastIndexOf(':') + 1))
                 .collect(Collectors.toSet());
 
@@ -91,17 +91,27 @@ class WarmupInstrumenterTest {
     }
 
     @Test
-    void accumulatesCountAcrossInvocations() throws Exception {
-        byte[] instrumented = new WarmupInstrumenter(getClass().getClassLoader())
-                .instrument(originalBytes(EagerWarmup.class));
+    void accumulatesEventsAcrossInvocations() throws Exception {
+        byte[] instrumented = instrumenter().instrument(originalBytes(EagerWarmup.class));
         Class<?> loaded = defineInstrumented(EagerWarmup.class, instrumented);
         Object target = loaded.getDeclaredConstructor().newInstance();
 
         loaded.getMethod("make").invoke(target);
         loaded.getMethod("make").invoke(target);
 
-        assertEquals(2L, recorder.total());
-        String key = recorder.snapshot().keySet().iterator().next();
-        assertEquals(2L, recorder.snapshot().get(key).count());
+        assertEquals(2L, trace.total());
+        Map<String, Long> counts = trace.counts();
+        assertEquals(2L, counts.values().iterator().next().longValue());
+    }
+
+    @Test
+    void theSameSiteKeyAlwaysGetsTheSameCode() throws Exception {
+        instrumenter().instrument(originalBytes(WarmupTarget.class));
+        Set<String> first = trace.assignedKeys();
+
+        instrumenter().instrument(originalBytes(WarmupTarget.class));
+
+        assertEquals(first, trace.assignedKeys(),
+                "re-instrumenting (as retransformation does) must not invent new codes");
     }
 }

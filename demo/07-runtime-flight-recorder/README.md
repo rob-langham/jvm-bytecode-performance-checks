@@ -1,4 +1,4 @@
-# 07 — The runtime flight recorder
+# 07 — The runtime trace
 
 Two classes the static checker **cannot** tell apart. Both satisfy the warmup contract exactly:
 guarded by a check, cached into a field. Both report zero findings.
@@ -6,23 +6,22 @@ guarded by a check, cached into a field. Both report zero findings.
 One of them never stops allocating.
 
 ```bash
-./gradlew -p demo :07-runtime-flight-recorder:run
+./gradlew -p demo :07-runtime-flight-recorder:verifyRun
 ```
+
+`verifyRun` runs the load, then reports on the trace it wrote and fails if the result does not
+show what this README claims.
 
 ## Expected output
 
 ```
-round    operations     recorded     per-site counts
-1        500000         51           PricingEngine#levels=1  ResizingCache#scratch=50
-2        1000000        101          PricingEngine#levels=1  ResizingCache#scratch=100
-3        1500000        151          PricingEngine#levels=1  ResizingCache#scratch=150
-4        2000000        201          PricingEngine#levels=1  ResizingCache#scratch=200
-5        2500000        251          PricingEngine#levels=1  ResizingCache#scratch=250
-6        3000000        301          PricingEngine#levels=1  ResizingCache#scratch=300
+code       count     first ms      last ms  state              site
+0              1        0.000        0.000  steady             demo.runtime.PricingEngine#levels
+1            300        0.310      142.507  STILL ALLOCATING   demo.runtime.ResizingCache#scratch
 ```
 
 `PricingEngine#levels` fires **once** and never again, through three million operations.
-`ResizingCache#scratch` is still climbing linearly in round six.
+`ResizingCache#scratch` is still allocating at the end of the run.
 
 ## Why static analysis cannot catch this
 
@@ -30,16 +29,18 @@ round    operations     recorded     per-site counts
 letter. The bug is that the guard *keeps letting allocations through*, because the workload's
 high-water mark creeps up. No amount of bytecode analysis can see that: it depends on the data.
 
-Static analysis proves an allocation *can* only happen on a guarded path. Only the recorder shows
-whether it *did* stop happening. A warmup site whose count is still climbing in steady state is a
+Static analysis proves an allocation *can* only happen on a guarded path. Only the trace shows
+whether it *did* stop happening. A warmup site that is still allocating at the end of a run is a
 bug the checker structurally cannot find.
 
 ## How the agent is wired
 
-The agent instruments `@AllocationsForWarmup` methods at class-load time and exposes counts over
-JMX as `AllocationFlightRecorderMXBean` — total allocations, plus a per-site record with count and
-first/last-seen timestamps. `LoadDriver` reads it through the platform MBean server; any JMX
-console would show the same thing against a live process.
+The agent instruments `@AllocationsForWarmup` methods at class-load time. Each allocation writes a
+12-byte record to `allocations.bin` in the trace directory: a site code, then a nanosecond
+timestamp. `allocations.keys` maps each code to the site it stands for. The agent does no analysis;
+it stays out of the way of the JIT.
+
+The report reads both files, and reads this build's classes to say what contract governs each site.
 
 It is a **separate, shaded artifact** from the library jar. A `-javaagent` jar is appended to the
 system class path with nothing beside it, so it must carry its own dependencies — with ASM
@@ -50,14 +51,15 @@ The build file here does that for you:
 ```kotlin
 tasks.named<JavaExec>("run") {
     dependsOn(agentJar)                                    // builds :core:shadowJar
-    jvmArgs("-javaagent:${agentJarFile()}")
+    jvmArgs("-javaagent:${agentJarFile()}=dir=$traceDirectory")
 }
 ```
 
 In a real project, with the artifact published, that is just:
 
 ```
-java -javaagent:core-<version>-agent.jar -jar your-app.jar
+java -javaagent:core-<version>-agent.jar=dir=build/allocation-trace -jar your-app.jar
+java -cp core-<version>.jar com.staticallocationchecker.trace.TraceReport build/allocation-trace build/classes
 ```
 
 ## Related

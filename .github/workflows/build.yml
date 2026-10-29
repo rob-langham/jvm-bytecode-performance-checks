@@ -95,7 +95,7 @@ jobs:
       - name: Run every scenario and verify its findings
         run: ./gradlew -p demo demo --stacktrace
 
-      # Checks the shape of the recorder's output, not just a clean exit. An agent that silently
+      # Checks the shape of the runtime trace's report, not just a clean exit. An agent that silently
       # stopped instrumenting looks exactly like a program that allocates nothing.
-      - name: Verify the runtime flight recorder
+      - name: Verify the runtime trace
         run: ./gradlew -p demo :07-runtime-flight-recorder:verifyRun --stacktrace

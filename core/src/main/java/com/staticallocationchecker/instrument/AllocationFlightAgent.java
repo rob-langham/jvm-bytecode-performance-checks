@@ -1,21 +1,31 @@
 package com.staticallocationchecker.instrument;
 
 import com.staticallocationchecker.annotations.AllocationsForWarmup;
-import com.staticallocationchecker.runtime.AllocationFlightRecorder;
+import com.staticallocationchecker.runtime.AllocationTrace;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.instrument.Instrumentation;
 import java.lang.reflect.AnnotatedElement;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Java agent that instruments {@code @AllocationsForWarmup} methods at class-load time so their
- * allocations are recorded in the {@link AllocationFlightRecorder}, and exposes the recorder over JMX.
+ * Java agent that instruments {@code @AllocationsForWarmup} methods at class-load time so every
+ * allocation they make is written to an {@link AllocationTrace}.
  *
- * <p>Attach at startup with {@code -javaagent:core-<version>-agent.jar}, or to a running VM with
- * the attach API. On attach, classes already loaded are retransformed, since in a warmup-monitoring
- * tool those are precisely the classes worth observing.
+ * <p>Attach at startup with {@code -javaagent:core-<version>-agent.jar=dir=<trace-directory>}, or to
+ * a running VM with the attach API. The trace directory defaults to {@value #DEFAULT_DIRECTORY} in
+ * the working directory. It is closed, and its buffers flushed, when the JVM shuts down normally.
+ *
+ * <p>On attach, classes already loaded are retransformed, since in a warmup-monitoring tool those
+ * are precisely the classes worth observing.
  */
 public final class AllocationFlightAgent {
+
+    /** Trace directory used when the agent is given no {@code dir=} option. */
+    public static final String DEFAULT_DIRECTORY = "allocation-trace";
 
     private AllocationFlightAgent() {
     }
@@ -23,20 +33,51 @@ public final class AllocationFlightAgent {
     /** Invoked by the JVM at startup when attached via {@code -javaagent}. */
     public static void premain(String args, Instrumentation instrumentation) {
         // Nothing of the application is loaded yet, so class-load-time transformation covers it.
-        install(instrumentation, false);
+        install(args, instrumentation, false);
     }
 
     /** Invoked by the JVM when the agent is attached to a running VM. */
     public static void agentmain(String args, Instrumentation instrumentation) {
-        install(instrumentation, true);
+        install(args, instrumentation, true);
     }
 
-    private static void install(Instrumentation instrumentation, boolean retransformExisting) {
-        AllocationFlightRecorder.register(AllocationFlightRecorder.instance());
+    private static void install(String args, Instrumentation instrumentation, boolean retransformExisting) {
+        AllocationTrace trace = openTrace(directoryFrom(args));
+        AllocationTrace.install(trace);
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> closeQuietly(trace), "allocation-trace-close"));
+
         boolean retransform = retransformExisting && instrumentation.isRetransformClassesSupported();
-        instrumentation.addTransformer(new WarmupClassFileTransformer(), retransform);
+        instrumentation.addTransformer(new WarmupClassFileTransformer(trace), retransform);
         if (retransform) {
             retransformLoadedWarmupClasses(instrumentation);
+        }
+    }
+
+    /** The {@code dir=} option of the agent arguments, or the default directory. */
+    static Path directoryFrom(String args) {
+        if (args != null) {
+            for (String option : args.split(",")) {
+                if (option.startsWith("dir=")) {
+                    return Paths.get(option.substring("dir=".length()));
+                }
+            }
+        }
+        return Paths.get(DEFAULT_DIRECTORY);
+    }
+
+    private static AllocationTrace openTrace(Path directory) {
+        try {
+            return AllocationTrace.open(directory);
+        } catch (IOException e) {
+            throw new UncheckedIOException("cannot open allocation trace in " + directory, e);
+        }
+    }
+
+    private static void closeQuietly(AllocationTrace trace) {
+        try {
+            trace.close();
+        } catch (IOException e) {
+            report("failed to close the allocation trace: " + e);
         }
     }
 

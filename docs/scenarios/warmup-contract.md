@@ -150,5 +150,5 @@ Fully compliant. Zero findings. And under a workload whose requests keep getting
 reallocates forever.
 
 Whether the guard eventually stops being taken depends on the *values* the method is called with,
-which no bytecode analysis can know. For that there is the runtime recorder, and a worked example
+which no bytecode analysis can know. For that there is the runtime trace, and a worked example
 of exactly this trap: [Warmup under load](../runtime/steady-state.md).

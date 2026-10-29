@@ -11,7 +11,7 @@ import com.staticallocationchecker.annotations.ZeroAllocations;
  * there is guarded by a null check and cached into a field, so it can fire at most once per
  * instance no matter how many times the hot path runs.
  *
- * <p>The static checker proves that shape. Only the runtime recorder can show that in a real
+ * <p>The static checker proves that shape. Only the runtime trace can show that in a real
  * process the site fires once and then stops - which is what the demo driver measures.
  */
 public final class PricingEngine {

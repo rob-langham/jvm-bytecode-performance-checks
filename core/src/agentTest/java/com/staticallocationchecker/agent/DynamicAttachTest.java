@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.staticallocationchecker.runtime.AllocationTrace;
+import com.staticallocationchecker.runtime.AllocationTraceReader;
 import com.sun.tools.attach.VirtualMachine;
 import java.io.BufferedReader;
 import java.io.File;
@@ -11,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -42,6 +45,7 @@ class DynamicAttachTest {
     @Timeout(180)
     void attachingInstrumentsClassesLoadedBeforeTheAgentArrived(@TempDir Path dir) throws Exception {
         Path marker = dir.resolve("go");
+        Path trace = dir.resolve("trace");
         Process process = startHarnessWithoutAgent(marker);
         List<String> output = new ArrayList<>();
 
@@ -51,7 +55,7 @@ class DynamicAttachTest {
 
             VirtualMachine vm = VirtualMachine.attach(String.valueOf(process.pid()));
             try {
-                vm.loadAgent(agentJar.toString());
+                vm.loadAgent(agentJar.toString(), "dir=" + trace);
             } finally {
                 vm.detach();
             }
@@ -66,11 +70,16 @@ class DynamicAttachTest {
 
         assertTrue(process.waitFor(120, TimeUnit.SECONDS), "the harness JVM did not exit");
         assertEquals(0, process.exitValue(), () -> "harness failed:\n" + String.join("\n", output));
-        assertTrue(output.contains("REGISTERED=true"),
-                () -> "attaching should register the MXBean: " + output);
-        assertTrue(output.contains("TOTAL=1"),
+        assertTrue(output.contains("DONE"), () -> "the harness should finish: " + output);
+
+        List<Integer> codes = new ArrayList<>();
+        AllocationTraceReader.forEachEvent(trace, (code, nanos) -> codes.add(code));
+        assertEquals(1, codes.size(),
                 () -> "the warmup allocation after attach should be recorded, which requires the "
-                        + "already-loaded class to have been retransformed: " + output);
+                        + "already-loaded class to have been retransformed");
+        Map<Integer, String> keys = AllocationTraceReader.readKeys(trace);
+        assertTrue(keys.get(codes.get(0)).contains("AttachHarness$Warmup#warm"), () -> "keys: " + keys);
+        assertTrue(Files.exists(trace.resolve(AllocationTrace.EVENTS_FILE)));
     }
 
     private Process startHarnessWithoutAgent(Path marker) throws Exception {

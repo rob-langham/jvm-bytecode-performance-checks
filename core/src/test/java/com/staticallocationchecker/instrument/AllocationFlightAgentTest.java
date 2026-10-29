@@ -7,23 +7,41 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.staticallocationchecker.TraceFixture;
 import com.staticallocationchecker.instrument.fixtures.NotWarmup;
 import com.staticallocationchecker.instrument.fixtures.WarmupTarget;
-import com.staticallocationchecker.runtime.AllocationFlightRecorder;
+import com.staticallocationchecker.runtime.AllocationTrace;
 import java.lang.instrument.ClassFileTransformer;
-import java.lang.management.ManagementFactory;
 import java.lang.reflect.Proxy;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
-import javax.management.ObjectName;
-import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class AllocationFlightAgentTest {
 
+    @TempDir
+    Path dir;
+
+    private TraceFixture trace;
+
+    @BeforeEach
+    void installTrace() throws Exception {
+        trace = new TraceFixture(dir);
+    }
+
+    @AfterEach
+    void closeTrace() throws Exception {
+        trace.close();
+    }
+
     @Test
     void transformerInstrumentsOnlyWarmupClasses() {
-        WarmupClassFileTransformer transformer = new WarmupClassFileTransformer();
+        WarmupClassFileTransformer transformer = new WarmupClassFileTransformer(trace.trace());
         ClassLoader loader = getClass().getClassLoader();
 
         byte[] warmup = transformer.transform(loader,
@@ -38,62 +56,55 @@ class AllocationFlightAgentTest {
     }
 
     @Test
-    void premainRegistersTransformerAndMBean() throws Exception {
+    void premainInstallsOneTransformerAndOpensTheTraceInTheGivenDirectory() throws Exception {
         List<ClassFileTransformer> added = new ArrayList<>();
-        java.lang.instrument.Instrumentation inst = fakeInstrumentation(added);
-
         try {
-            AllocationFlightAgent.premain("", inst);
+            AllocationFlightAgent.premain("dir=" + dir.resolve("run"), fakeInstrumentation(added));
 
             assertEquals(1, added.size(), "premain should install one transformer");
-            assertTrue(ManagementFactory.getPlatformMBeanServer()
-                    .isRegistered(new ObjectName(AllocationFlightRecorder.OBJECT_NAME)), "MBean registered");
+            assertTrue(java.nio.file.Files.isRegularFile(dir.resolve("run").resolve(AllocationTrace.EVENTS_FILE)),
+                    "the events file should be created in the directory the agent was given");
+            assertTrue(java.nio.file.Files.isRegularFile(dir.resolve("run").resolve(AllocationTrace.KEYS_FILE)),
+                    "the keys file should be created in the directory the agent was given");
         } finally {
-            AllocationFlightRecorder.unregister();
+            AllocationTrace.instance().close();
+            AllocationTrace.install(null);
         }
     }
 
     @Test
     void agentmainInstallsTheSameMachineryAsPremain() throws Exception {
         List<ClassFileTransformer> added = new ArrayList<>();
-
         try {
-            AllocationFlightAgent.agentmain("", fakeInstrumentation(added));
+            AllocationFlightAgent.agentmain("dir=" + dir.resolve("attached"), fakeInstrumentation(added));
 
             assertEquals(1, added.size(), "dynamic attach should install the transformer too");
-            assertTrue(ManagementFactory.getPlatformMBeanServer()
-                    .isRegistered(new ObjectName(AllocationFlightRecorder.OBJECT_NAME)), "MBean registered");
         } finally {
-            AllocationFlightRecorder.unregister();
+            AllocationTrace.instance().close();
+            AllocationTrace.install(null);
         }
     }
 
     @Test
-    void premainToleratesNullAndNonEmptyArgumentStrings() {
-        List<ClassFileTransformer> added = new ArrayList<>();
-        try {
-            AllocationFlightAgent.premain(null, fakeInstrumentation(added));
-            AllocationFlightAgent.premain("someOption=1", fakeInstrumentation(added));
-
-            assertEquals(2, added.size());
-        } finally {
-            AllocationFlightRecorder.unregister();
-        }
+    void directoryIsTheDirOptionOrTheDefault() {
+        assertEquals(Paths.get("out/run"), AllocationFlightAgent.directoryFrom("x=1,dir=out/run"));
+        assertEquals(Paths.get(AllocationFlightAgent.DEFAULT_DIRECTORY), AllocationFlightAgent.directoryFrom(null));
+        assertEquals(Paths.get(AllocationFlightAgent.DEFAULT_DIRECTORY), AllocationFlightAgent.directoryFrom("someOption=1"));
     }
 
     @Test
-void agentmainRetransformsAlreadyLoadedWarmupClasses() throws Exception {
+    void agentmainRetransformsAlreadyLoadedWarmupClasses() throws Exception {
         List<ClassFileTransformer> added = new ArrayList<>();
         List<String> retransformed = new ArrayList<>();
-        java.lang.instrument.Instrumentation inst = recordingInstrumentation(added, retransformed);
-
         try {
-            AllocationFlightAgent.agentmain("", inst);
+            AllocationFlightAgent.agentmain("dir=" + dir.resolve("attached"),
+                    recordingInstrumentation(added, retransformed));
 
             assertFalse(retransformed.isEmpty(),
                     "already-loaded warmup classes should be retransformed on attach");
         } finally {
-            AllocationFlightRecorder.unregister();
+            AllocationTrace.instance().close();
+            AllocationTrace.install(null);
         }
     }
 

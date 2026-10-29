@@ -8,6 +8,7 @@ import java.util.Deque;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.ToIntFunction;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Handle;
@@ -25,19 +26,21 @@ import org.objectweb.asm.tree.MethodNode;
 
 /**
  * Rewrites {@code @AllocationsForWarmup} methods so that each allocation site reports to the
- * {@link com.staticallocationchecker.runtime.AllocationFlightRecorder} at runtime.
+ * {@link com.staticallocationchecker.runtime.AllocationTrace} at runtime.
  *
  * <p>At every site the shared {@link Allocations} detector recognizes, a stack-neutral
- * {@code LDC key; INVOKESTATIC recordSite(String)} pair is inserted before the allocating
- * instruction. Because the insertion is balanced within its basic block, the existing stack-map
- * frames stay valid and only {@code maxStack} needs recomputing.
+ * {@code LDC code; INVOKESTATIC recordSite(int)} pair is inserted before the allocating instruction.
+ * The {@code code} is a small integer assigned by the trace, which also records the site key that
+ * it stands for; keeping the probe to an integer keeps it cheap for the JIT. Because the insertion
+ * is balanced within its basic block, the existing stack-map frames stay valid and only
+ * {@code maxStack} needs recomputing.
  */
 public final class WarmupInstrumenter {
 
     private static final String ALLOCATIONS_FOR_WARMUP =
             "Lcom/staticallocationchecker/annotations/AllocationsForWarmup;";
     private static final String RECORDER =
-            "com/staticallocationchecker/runtime/AllocationFlightRecorder";
+            "com/staticallocationchecker/runtime/AllocationTrace";
     private static final String LAMBDA_METAFACTORY = "java/lang/invoke/LambdaMetafactory";
 
     /**
@@ -47,12 +50,17 @@ public final class WarmupInstrumenter {
      */
     private final TypeOracle oracle;
 
+    /** Maps a site key to the code the probe passes, normally {@code AllocationTrace::siteCode}. */
+    private final ToIntFunction<String> siteCodes;
+
     /**
      * @param resolutionLoader classloader used to resolve the types classification depends on -
      *                         typically the loader that will define the instrumented class
+     * @param siteCodes        assigns each site key its integer code
      */
-    public WarmupInstrumenter(ClassLoader resolutionLoader) {
+    public WarmupInstrumenter(ClassLoader resolutionLoader, ToIntFunction<String> siteCodes) {
         this.oracle = TypeOracle.forClassLoader(resolutionLoader);
+        this.siteCodes = siteCodes;
     }
 
     /** Returns instrumented bytecode, or null if the class has no warmup allocation sites. */
@@ -151,9 +159,9 @@ public final class WarmupInstrumenter {
             // probes this loop inserts and stays comparable to what the static checker would see.
             String key = Allocations.siteKey(binaryClass, method.name, line, offset, category);
             InsnList probe = new InsnList();
-            probe.add(new LdcInsnNode(key));
+            probe.add(new LdcInsnNode(siteCodes.applyAsInt(key)));
             probe.add(new MethodInsnNode(
-                    Opcodes.INVOKESTATIC, RECORDER, "recordSite", "(Ljava/lang/String;)V", false));
+                    Opcodes.INVOKESTATIC, RECORDER, "recordSite", "(I)V", false));
             method.instructions.insertBefore(insn, probe);
             changed = true;
         }

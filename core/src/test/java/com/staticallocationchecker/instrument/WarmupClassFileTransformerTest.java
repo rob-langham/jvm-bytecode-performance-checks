@@ -7,12 +7,17 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.staticallocationchecker.TraceFixture;
 import com.staticallocationchecker.instrument.fixtures.NotWarmup;
 import com.staticallocationchecker.instrument.fixtures.WarmupTarget;
 import java.lang.instrument.ClassFileTransformer;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * The transformer's contract with the JVM: never throw, return null when unchanged, and survive
@@ -20,8 +25,23 @@ import org.junit.jupiter.api.Test;
  */
 class WarmupClassFileTransformerTest {
 
-    private final ClassFileTransformer transformer = new WarmupClassFileTransformer();
+    @TempDir
+    Path dir;
+
+    private TraceFixture trace;
+    private ClassFileTransformer transformer;
     private final ClassLoader loader = getClass().getClassLoader();
+
+    @BeforeEach
+    void installTrace() throws Exception {
+        trace = new TraceFixture(dir);
+        transformer = new WarmupClassFileTransformer(trace.trace());
+    }
+
+    @AfterEach
+    void closeTrace() throws Exception {
+        trace.close();
+    }
 
     private byte[] transform(String internalName, byte[] bytes) {
         try {
@@ -70,7 +90,7 @@ class WarmupClassFileTransformerTest {
     @Test
     void reportsWhyItDeclinedToTransformAClass() throws Exception {
         List<String> diagnostics = new ArrayList<>();
-        ClassFileTransformer reporting = new WarmupClassFileTransformer(diagnostics::add);
+        ClassFileTransformer reporting = new WarmupClassFileTransformer(trace.trace(), diagnostics::add);
 
         reporting.transform(loader, "com/example/Corrupt", null, null, new byte[] {1, 2, 3, 4});
 
@@ -83,7 +103,7 @@ class WarmupClassFileTransformerTest {
     @Test
     void reportsEachDistinctFailureOnlyOnce() throws Exception {
         List<String> diagnostics = new ArrayList<>();
-        ClassFileTransformer reporting = new WarmupClassFileTransformer(diagnostics::add);
+        ClassFileTransformer reporting = new WarmupClassFileTransformer(trace.trace(), diagnostics::add);
 
         for (int i = 0; i < 50; i++) {
             reporting.transform(loader, "com/example/Corrupt" + i, null, null, new byte[] {1, 2, 3, 4});
@@ -95,7 +115,7 @@ class WarmupClassFileTransformerTest {
 
     @Test
     void survivesADiagnosticSinkThatItselfThrows() {
-        ClassFileTransformer reporting = new WarmupClassFileTransformer(message -> {
+        ClassFileTransformer reporting = new WarmupClassFileTransformer(trace.trace(), message -> {
             throw new IllegalStateException("logging is broken");
         });
 

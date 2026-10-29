@@ -88,8 +88,8 @@ The checker proves a warmup allocation *can* only happen on a guarded path. It c
 happens *once*. A buffer that is reallocated whenever a request outgrows it satisfies the contract
 perfectly and still allocates forever under a workload whose requests keep growing.
 
-For that there is a `-javaagent` flight recorder that counts warmup allocation sites at runtime and
-exposes them over JMX. Put a real workload through it and a warmed-up site stops contributing while
+For that there is a `-javaagent` that writes every warmup allocation to a binary trace at runtime, and
+a report that reads the trace back. Put a real workload through it and a warmed-up site stops contributing while
 a leaking one keeps climbing:
 
 ```
@@ -108,7 +108,7 @@ Both classes pass the static check. Only one of them actually reaches a steady s
 - [Usage and best practices](usage.md) — where to put the annotations, and how to live with the results.
 - [Allocation scenarios](scenarios/) — one page per thing that allocates: why it happens, where it
   shows up in real code, and how to avoid it.
-- [Warmup under load](runtime/steady-state.md) — the runtime recorder, and proving steady state.
+- [Warmup under load](runtime/steady-state.md) — the runtime trace, and proving steady state.
 
 If you only read one page, read [autoboxing](scenarios/autoboxing.md) — it is the allocation most
 often sitting on a hot path that nobody has noticed, and it is worth knowing about whether or not

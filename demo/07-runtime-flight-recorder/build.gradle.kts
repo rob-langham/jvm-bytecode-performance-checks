@@ -34,26 +34,31 @@ val agentJar = tasks.register<Exec>("buildAgentJar") {
 fun agentJarFile() = rootDir.parentFile
     .resolve("core/build/libs/core-0.1.0-agent.jar")
 
+// The agent writes its trace to build/allocation-trace while the driver runs. The report turns that
+// trace into numbers and reads this build's classes to say which contract governs each site.
+val traceDirectory = layout.buildDirectory.get().asFile.resolve("allocation-trace")
+
 tasks.named<JavaExec>("run") {
     dependsOn(agentJar)
-    jvmArgs("-javaagent:${agentJarFile()}")
+    jvmArgs("-javaagent:${agentJarFile()}=dir=$traceDirectory")
 }
 
 /**
- * Runs the driver and checks the *shape* of the result, not just that it exited cleanly.
+ * Reports on the trace the last run wrote, and checks the *shape* of the result, not just that it
+ * exited cleanly.
  *
- * <p>This scenario's entire claim is that one site stops allocating and the other does not. If the
- * agent silently stopped instrumenting - which is exactly how it failed once before, by loading no
- * ASM and swallowing every error - the program would still run happily and print zeroes. Only
- * asserting on the numbers catches that.
+ * <p>This scenario's entire claim is that one site settles and the other does not. If the agent
+ * silently stopped instrumenting - which is exactly how it failed once before, by loading no ASM and
+ * swallowing every error - the program would still run happily and the trace would be empty. Only
+ * asserting on the report catches that.
  */
 tasks.register<JavaExec>("verifyRun") {
     group = "verification"
-    description = "Runs the load driver and verifies the recorder actually recorded."
-    dependsOn(agentJar)
+    description = "Reports on the allocation trace from the last run and verifies its shape."
+    dependsOn("run")
     classpath = sourceSets["main"].runtimeClasspath
-    mainClass = "demo.runtime.LoadDriver"
-    jvmArgs("-javaagent:${agentJarFile()}")
+    mainClass = "com.staticallocationchecker.trace.TraceReport"
+    args(traceDirectory.absolutePath, sourceSets["main"].output.classesDirs.singleFile.absolutePath)
 
     val captured = ByteArrayOutputStream()
     standardOutput = captured
@@ -62,24 +67,29 @@ tasks.register<JavaExec>("verifyRun") {
         val output = captured.toString()
         println(output)
 
+        // One row per site in the summary table: code, count, first, last, state, class#method.
+        val states = Regex("(?m)^\\d+\\s+\\d+\\s+[\\d.]+\\s+[\\d.]+\\s+(steady|STILL ALLOCATING)\\s+(\\S+)$")
+            .findAll(output)
+            .associate { match -> match.groupValues[2] to match.groupValues[1] }
+
         val problems = mutableListOf<String>()
-        if (!output.contains("PricingEngine#levels=1")) {
-            problems += "PricingEngine should allocate exactly once and hold at 1"
+        if (states["demo.runtime.PricingEngine#levels"] != "steady") {
+            problems += "PricingEngine should settle; saw ${states["demo.runtime.PricingEngine#levels"]}"
         }
-        // The last round must show the resizing cache still climbing well past the engine's 1.
-        val finalRound = output.lines().lastOrNull { line -> line.trimStart().startsWith("6 ") }
-        val climbing = Regex("ResizingCache#scratch=(\\d+)").find(finalRound.orEmpty())
-            ?.groupValues?.get(1)?.toIntOrNull() ?: 0
-        if (climbing < 100) {
-            problems += "ResizingCache should still be climbing by round 6, saw $climbing"
+        if (states["demo.runtime.ResizingCache#scratch"] != "STILL ALLOCATING") {
+            problems += "ResizingCache should still be allocating at the end; saw " +
+                states["demo.runtime.ResizingCache#scratch"]
+        }
+        if (Regex("contract: @AllocationsForWarmup").findAll(output).count() < 2) {
+            problems += "both sites should be governed by @AllocationsForWarmup in the bytecode"
         }
         if (problems.isNotEmpty()) {
             throw GradleException(
                 "The runtime demo no longer demonstrates what its README claims:\n  " +
                     problems.joinToString("\n  ") +
-                    "\n\nA recorder reporting nothing looks identical to a clean program.")
+                    "\n\nA trace with no events looks identical to a clean program.")
         }
-        println("Runtime demo verified: one site converged, the other did not.")
+        println("Runtime demo verified: one site settled, the other did not.")
     }
 }
 

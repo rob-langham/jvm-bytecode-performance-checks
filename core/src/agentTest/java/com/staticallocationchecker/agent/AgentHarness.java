@@ -1,15 +1,12 @@
 package com.staticallocationchecker.agent;
 
 import com.staticallocationchecker.annotations.AllocationsForWarmup;
-import java.lang.management.ManagementFactory;
-import javax.management.MBeanServer;
-import javax.management.ObjectName;
-import javax.management.openmbean.TabularData;
 
 /**
- * Runs inside a JVM launched with {@code -javaagent}, exercises a warmup method, and prints what
- * the agent recorded. Everything it needs from the checker comes from the agent jar itself, which
- * the JVM appends to the system class path - so this also proves the jar is self-sufficient.
+ * Runs inside a JVM launched with {@code -javaagent}, and exercises a warmup method. What the agent
+ * recorded is read back from the trace directory by the test. Everything it needs from the checker
+ * comes from the agent jar itself, which the JVM appends to the system class path - so this also
+ * proves the jar is self-sufficient.
  *
  * <p>Deliberately a {@code main} rather than a unit test: the premain path, the manifest attributes
  * and class-load-time transformation only exist in a real JVM launch.
@@ -32,19 +29,11 @@ public final class AgentHarness {
         }
     }
 
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) {
         Warmup warmup = new Warmup();
         for (int i = 0; i < 3; i++) {
             warmup.warm();
         }
-
-        MBeanServer server = ManagementFactory.getPlatformMBeanServer();
-        ObjectName name = new ObjectName("com.staticallocationchecker:type=AllocationFlightRecorder");
-
-        System.out.println("REGISTERED=" + server.isRegistered(name));
-        System.out.println("TOTAL=" + server.getAttribute(name, "TotalAllocations"));
-        TabularData sites = (TabularData) server.getAttribute(name, "Sites");
-        System.out.println("SITES=" + sites.size());
-        sites.values().forEach(row -> System.out.println("SITE=" + ((javax.management.openmbean.CompositeData) row).get("key")));
+        System.out.println("DONE");
     }
 }

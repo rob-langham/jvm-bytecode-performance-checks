@@ -1,11 +1,8 @@
 package com.staticallocationchecker.agent;
 
 import com.staticallocationchecker.annotations.AllocationsForWarmup;
-import java.lang.management.ManagementFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import javax.management.MBeanServer;
-import javax.management.ObjectName;
 
 /**
  * Runs in a JVM started <em>without</em> any agent. It loads and exercises a warmup class first,
@@ -57,10 +54,6 @@ public final class AttachHarness {
         warmup.forget();
         warmup.warm();
 
-        MBeanServer server = ManagementFactory.getPlatformMBeanServer();
-        ObjectName name = new ObjectName("com.staticallocationchecker:type=AllocationFlightRecorder");
-        System.out.println("REGISTERED=" + server.isRegistered(name));
-        System.out.println("TOTAL=" + (server.isRegistered(name)
-                ? server.getAttribute(name, "TotalAllocations") : "n/a"));
+        System.out.println("DONE");
     }
 }

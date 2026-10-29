@@ -136,7 +136,7 @@ Allocations of `Throwable` subtypes are exempt: the exceptional path is not the 
 need to preallocate exceptions to satisfy the checker, and doing so costs you the stack trace. See
 [exceptions](scenarios/exceptions.md).
 
-### Static analysis first, then the recorder
+### Static analysis first, then the trace
 
 The static checker and the runtime agent answer different questions:
 
@@ -144,10 +144,10 @@ The static checker and the runtime agent answer different questions:
 | --- | --- |
 | Can this path allocate at all? | Static checker |
 | Is this warmup allocation on a guarded, caching path? | Static checker |
-| Does this warmup site actually stop firing under load? | [Runtime recorder](runtime/steady-state.md) |
-| How many times did it fire, and when was it last seen? | Runtime recorder |
+| Does this warmup site actually stop firing under load? | [Runtime trace](runtime/steady-state.md) |
+| How many times did it fire, and when was it last seen? | Runtime trace |
 
-The static checker is cheap and belongs in CI. The recorder needs a realistic workload and belongs
+The static checker is cheap and belongs in CI. The trace needs a realistic workload and belongs
 in your load-test environment.
 
 ## Dealing with unanalyzable calls
@@ -230,7 +230,7 @@ List.of("com.example.Heavy#<init>")
 
 The same reasoning is why growing a buffer during warmup is accepted. Expanding an array *must*
 discard the old one — that is what growth is — and the contract permits it. Whether the growing ever
-stops is a runtime property, which is what the [flight recorder](runtime/steady-state.md) is for.
+stops is a runtime property, which is what the [runtime trace](runtime/steady-state.md) is for.
 
 ## Known gaps
 

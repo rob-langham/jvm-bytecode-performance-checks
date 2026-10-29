@@ -1,5 +1,6 @@
 package com.staticallocationchecker.instrument;
 
+import com.staticallocationchecker.runtime.AllocationTrace;
 import java.lang.instrument.ClassFileTransformer;
 import java.security.ProtectionDomain;
 import java.util.Set;
@@ -19,14 +20,16 @@ import java.util.function.Consumer;
  */
 final class WarmupClassFileTransformer implements ClassFileTransformer {
 
+    private final AllocationTrace trace;
     private final Consumer<String> diagnostics;
     private final Set<String> reported = ConcurrentHashMap.newKeySet();
 
-    WarmupClassFileTransformer() {
-        this(message -> System.err.println("static-allocation-checker: " + message));
+    WarmupClassFileTransformer(AllocationTrace trace) {
+        this(trace, message -> System.err.println("static-allocation-checker: " + message));
     }
 
-    WarmupClassFileTransformer(Consumer<String> diagnostics) {
+    WarmupClassFileTransformer(AllocationTrace trace, Consumer<String> diagnostics) {
+        this.trace = trace;
         this.diagnostics = diagnostics;
     }
 
@@ -39,7 +42,7 @@ final class WarmupClassFileTransformer implements ClassFileTransformer {
             byte[] classfileBuffer) {
         try {
             ClassLoader resolver = loader != null ? loader : ClassLoader.getSystemClassLoader();
-            return new WarmupInstrumenter(resolver).instrument(classfileBuffer);
+            return new WarmupInstrumenter(resolver, trace::siteCode).instrument(classfileBuffer);
         } catch (Throwable t) {
             report(className, t);
             return null;

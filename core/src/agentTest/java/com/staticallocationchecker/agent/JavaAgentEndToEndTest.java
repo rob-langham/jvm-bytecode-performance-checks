@@ -4,11 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.staticallocationchecker.runtime.AllocationTrace;
+import com.staticallocationchecker.runtime.AllocationTraceReader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.jar.Attributes;
 import java.util.jar.JarFile;
@@ -16,6 +19,7 @@ import java.util.jar.Manifest;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Launches a real JVM with {@code -javaagent:core.jar} and asserts on what the agent recorded.
@@ -69,24 +73,26 @@ class JavaAgentEndToEndTest {
 
     @Test
     @Timeout(120)
-    void agentInstrumentsWarmupMethodsInARealJvmLaunch() throws Exception {
-        List<String> output = runJvmWithAgent();
+    void agentWritesEveryAllocationToTheTraceInRealJvmLaunch(@TempDir Path dir) throws Exception {
+        List<String> output = runJvmWithAgent(dir);
+        assertTrue(output.contains("DONE"), () -> "the harness should finish: " + output);
 
-        assertTrue(output.contains("REGISTERED=true"),
-                () -> "the agent should register its MXBean: " + output);
-        assertTrue(output.contains("TOTAL=1"),
-                () -> "the lazy allocation fires once across three calls: " + output);
-        assertTrue(output.contains("SITES=1"), () -> "expected exactly one site: " + output);
-        assertTrue(output.stream().anyMatch(l -> l.startsWith("SITE=")
-                        && l.contains("AgentHarness$Warmup#warm")),
-                () -> "the site key should name the warmup method: " + output);
+        List<Integer> codes = new ArrayList<>();
+        AllocationTraceReader.forEachEvent(dir, (code, nanos) -> codes.add(code));
+        assertEquals(1, codes.size(), "the lazy allocation fires once across three calls");
+
+        Map<Integer, String> keys = AllocationTraceReader.readKeys(dir);
+        assertEquals(1, keys.size(), () -> "expected exactly one site key: " + keys);
+        assertTrue(keys.get(codes.get(0)).startsWith("com.staticallocationchecker.agent.AgentHarness$Warmup#warm:"),
+                () -> "the key should name the warmup method: " + keys);
+        assertTrue(Files.exists(dir.resolve(AllocationTrace.KEYS_FILE)));
     }
 
-    private List<String> runJvmWithAgent() throws Exception {
+    private List<String> runJvmWithAgent(Path dir) throws Exception {
         Path java = Path.of(System.getProperty("java.home"), "bin", "java");
         ProcessBuilder builder = new ProcessBuilder(
                 java.toString(),
-                "-javaagent:" + agentJar,
+                "-javaagent:" + agentJar + "=dir=" + dir,
                 "-cp", harnessClasses.toString(),
                 AgentHarness.class.getName());
         builder.redirectErrorStream(true);
