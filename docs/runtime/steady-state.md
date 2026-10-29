@@ -57,26 +57,28 @@ The agent records every allocation site in the application, and the report decid
 means afterwards.
 
 1. **The agent writes a trace.** Each allocation appends a fixed 12-byte record to `allocations.bin`:
-   a 4-byte site code, then an 8-byte timestamp in nanoseconds.
+   a 4-byte site code, then an 8-byte timestamp in nanoseconds. A `warmup.txt` file records when the
+   warm-up period ends.
 2. **A key file says what each code is.** `allocations.keys` has one `code<TAB>site` line per site,
    where the site is `class#method:line@offset:CATEGORY`. The key names the allocation in the
    bytecode, so the same site always has the same key.
 3. **The report reads both files.** It turns the trace into counts and times, then reads the classes
-   for their annotations and runs the static checker over them. The annotations decide what a site
-   means: a warmup site is expected to settle, an allocation under `@ZeroAllocations` is a violation,
-   and anything else is counted but not judged.
+   for their annotations and runs the static checker over them. Allocations in the warm-up period are
+   expected. After it, the annotations decide what a site means: a warmup site must stop allocating, an
+   allocation under `@ZeroAllocations` is a violation, and anything else is counted but not judged.
 
 Attach it at startup:
 
 ```bash
 ./gradlew :core:shadowJar
-java -javaagent:core/build/libs/core-0.1.0-agent.jar=dir=build/allocation-trace -jar your-app.jar
+java -javaagent:core/build/libs/core-0.1.0-agent.jar=dir=build/allocation-trace,warmup=30 -jar your-app.jar
 java -cp core/build/libs/core-0.1.0.jar com.staticallocationchecker.trace.TraceReport \
      build/allocation-trace target/classes
 ```
 
-The `dir=` option is where the trace goes. It defaults to `allocation-trace` in the working
-directory. The trace is complete when the JVM exits normally.
+The options are `dir=`, where the trace goes (default `allocation-trace` in the working directory), and
+`warmup=`, the warm-up period in seconds from when the agent starts (default `0`). The trace is complete
+when the JVM exits normally.
 
 Your source is untouched. At class load the agent inserts a single `LDC code; INVOKESTATIC recordSite`
 before each allocation, in every method. In `PricingEngine#levels` the effect is as if the method had
@@ -116,7 +118,7 @@ cd examples/steady-state-demo
 AGENT=../../core/build/libs/core-0.1.0-SNAPSHOT-agent.jar
 mkdir -p build/classes
 javac -cp $AGENT -d build/classes $(find src -name '*.java')
-java -javaagent:$AGENT=dir=build/trace -cp build/classes:$AGENT demo.LoadDriver
+java -javaagent:$AGENT=dir=build/trace,warmup=0.5 -cp build/classes:$AGENT demo.LoadDriver
 java -cp $AGENT com.staticallocationchecker.trace.TraceReport build/trace build/classes
 ```
 
@@ -131,29 +133,29 @@ No findings. Statically, these two classes are equally well-behaved.
 
 ## Then: the trace says which one settles
 
-This is real output from one run of the demo. The trace records every site in the program, so the
-driver's own allocations appear too. They are `unannotated`, so they are counted but not judged.
-Abridged:
+The first 0.5 seconds are warm-up. This is real output from one run of the demo, abridged. The trace
+records every site in the program, so the driver's own allocations appear too. They are `unannotated`,
+so they are counted but not judged.
 
 ```
 Allocation trace: examples/steady-state-demo/build/trace
-Events: 263 over 3100.953 ms, from 14 site(s)
-Warmup sites are steady when they make no allocations in the last 20% of the run.
+Events: 246 over 3250.364 ms, from 14 site(s)
+Warm-up: ends 442.409 ms into the run. Only allocations after that are steady state.
 
 By contract:
-  warmup          sites    2  events        130  still allocating 1  violations 0
-  unannotated     sites   12  events        133  still allocating 0  violations 0
+  warmup          sites    2  warm-up events         49  steady events         64  still allocating 1  violations 0
+  unannotated     sites   12  warm-up events         33  steady events        100  still allocating 0  violations 0
 
-code       count     first ms      last ms  contract        state              site
+code       count    warm-up     steady     first ms      last ms  contract        state             site
 ...
-12             1        5.500        5.500  warmup          steady             demo.PricingEngine#levels
-13           129        5.577     2593.068  warmup          STILL ALLOCATING   demo.ResizingCache#scratch
+12             1          1          0        4.949        4.949  warmup          steady            demo.PricingEngine#levels
+13           112         48         64        5.013     2902.758  warmup          STILL ALLOCATING  demo.ResizingCache#scratch
 ```
 
-**`PricingEngine#levels` settles immediately.** Its allocations happen at the start, and then nothing
-for the rest of the run. That is warmup working as the annotation claims.
+**`PricingEngine#levels` settles.** Its one allocation happens during warm-up, and nothing after
+warm-up allocates it again. That is warmup working as the annotation claims.
 
-**`ResizingCache#scratch` never does.** It is still allocating near the end of the run. On a
+**`ResizingCache#scratch` never does.** It allocates through warm-up and keeps going well past it. On a
 latency-sensitive path this is a slow leak of GC pressure that no amount of code review or static
 checking would have found.
 
@@ -174,28 +176,29 @@ unsynchronised lazy init.
 
 | Pattern | Means |
 | --- | --- |
-| Count rises early, then the site is `steady` | Warmed up. Working as intended. |
-| `STILL ALLOCATING` at the end of the run | Not a warmup site. The guard depends on runtime values. |
+| Allocates during warm-up, then the site is `steady` | Warmed up. Working as intended. |
+| `STILL ALLOCATING` after warm-up | Not a warmup site. The guard depends on runtime values. |
+| `zero-allocation` with `VIOLATION` | Allocated after warm-up under `@ZeroAllocations`. |
+| `zero-allocation` with `warm-up only` | Allocated only during warm-up, which the contract allows. |
 | A few events at the start, matching your thread count | Racy lazy init. Benign or not, it is doing N× the work. |
 | A site you expected is missing from the report | Either that path never ran, or the class was loaded before the agent arrived. |
 | A site is `STILL ALLOCATING` but is cheap per event | Worth knowing even if the rate is low; a steady trickle still builds up. |
 
-"Steady" means the site made no allocations in the final 20% of the run. That cut-off is a
-judgement, so read the last-ms column too: a site that stopped at 80% of the run is steady, but a
-site that stopped at 79% may not have been given long enough to show it.
+Warm-up is a period you choose, not a guess. It counts from when the agent starts, so it must be long
+enough for your application's startup to finish. Pick it from the workload: if a site you expect to
+settle still shows `STILL ALLOCATING`, the warm-up was too short, or the site really does not settle.
 
 ## Doing this in your own load test
 
 **1. Attach at startup.** `premain` instruments at class-load time, which covers everything because
 nothing of the application is loaded that early. Attaching to a running JVM also works: `agentmain`
-retransforms the classes already loaded that declare `@AllocationsForWarmup`. Two limits there:
+retransforms the classes already loaded. Two limits there:
 **bootstrap-loaded classes are skipped**, and any allocation that happened before the attach is not
 in the trace. For measuring warmup, starting with `-javaagent` is the more honest measurement.
 
-**2. Drive real load until throughput settles, then look at the tail.** Class loading, JIT
-compilation, connection pools and caches all legitimately allocate early. The steady question is
-whether a site is still allocating near the end of a long run, so run long enough for the early
-noise to pass.
+**2. Set a warm-up that covers your startup, then drive real load.** Class loading, JIT compilation,
+connection pools and caches all legitimately allocate early. Set `warmup=` to cover that, then run long
+enough after it that a site which settles would have shown it.
 
 **3. Read the report in CI, not just by eye.** The report is plain text, so a check can fail the
 build when a site you expect to settle reports `STILL ALLOCATING`. The demo does exactly this in its

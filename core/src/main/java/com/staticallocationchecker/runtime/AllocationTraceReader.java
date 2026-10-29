@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.OptionalLong;
 
 /**
  * Reads a trace directory written by {@link AllocationTrace}.
@@ -44,6 +45,23 @@ public final class AllocationTraceReader {
                 System.arraycopy(buffer, usable, buffer, 0, carried);
             }
         }
+    }
+
+    /**
+     * The nanoTime at which the warm-up period ended, or empty if the trace has no warm-up file (a trace
+     * written by something other than {@link AllocationTrace}, or an older one).
+     */
+    public static OptionalLong warmupEnd(Path directory) throws IOException {
+        Path file = directory.resolve(AllocationTrace.WARMUP_FILE);
+        if (!Files.isRegularFile(file)) {
+            return OptionalLong.empty();
+        }
+        for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+            if (line.startsWith("endNanos=")) {
+                return OptionalLong.of(Long.parseLong(line.substring("endNanos=".length()).trim()));
+            }
+        }
+        return OptionalLong.empty();
     }
 
     /** The site keys in {@code directory}, by code, in the order they were assigned. */

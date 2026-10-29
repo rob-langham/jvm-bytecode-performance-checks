@@ -10,7 +10,7 @@ package demo.runtime;
 public final class LoadDriver {
 
     private static final int ROUNDS = 6;
-    private static final int OPERATIONS_PER_ROUND = 500_000;
+    private static final int OPERATIONS_PER_ROUND = 5_000_000;
 
     private LoadDriver() {
     }

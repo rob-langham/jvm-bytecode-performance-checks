@@ -14,19 +14,20 @@ show what this README claims.
 
 ## Expected output
 
+The first 0.1 seconds are warm-up. Abridged from one run:
+
 ```
 By contract:
-  warmup          sites    2  events        301  still allocating 1  violations 0
-  unannotated     sites    5  events         20  still allocating 0  violations 0
+  warmup          sites    2  warm-up events        529  steady events       2472  still allocating 1  violations 0
+  unannotated     sites    5  warm-up events          5  steady events         15  still allocating 0  violations 0
 
-code       count     first ms      last ms  contract        state              site
-5              1        1.859        1.859  warmup          steady             demo.runtime.PricingEngine#levels
-6            300        1.870       44.548  warmup          STILL ALLOCATING   demo.runtime.ResizingCache#scratch
+code       count    warm-up     steady     first ms      last ms  contract        state             site
+5              1          1          0        5.549        5.549  warmup          steady            demo.runtime.PricingEngine#levels
+6           3000        528       2472        5.571      181.804  warmup          STILL ALLOCATING  demo.runtime.ResizingCache#scratch
 ```
 
-
-`PricingEngine#levels` fires **once** and never again, through three million operations.
-`ResizingCache#scratch` is still allocating at the end of the run.
+`PricingEngine#levels` allocates once, during warm-up, and never again through thirty million
+operations. `ResizingCache#scratch` is still allocating well after warm-up.
 
 ## Why static analysis cannot catch this
 
@@ -58,14 +59,14 @@ The build file here does that for you:
 ```kotlin
 tasks.named<JavaExec>("run") {
     dependsOn(agentJar)                                    // builds :core:shadowJar
-    jvmArgs("-javaagent:${agentJarFile()}=dir=$traceDirectory")
+    jvmArgs("-javaagent:${agentJarFile()}=dir=$traceDirectory,warmup=0.1")
 }
 ```
 
 In a real project, with the artifact published, that is just:
 
 ```
-java -javaagent:core-<version>-agent.jar=dir=build/allocation-trace -jar your-app.jar
+java -javaagent:core-<version>-agent.jar=dir=build/allocation-trace,warmup=30 -jar your-app.jar
 java -cp core-<version>.jar com.staticallocationchecker.trace.TraceReport build/allocation-trace build/classes
 ```
 

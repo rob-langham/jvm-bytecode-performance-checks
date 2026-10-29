@@ -40,7 +40,7 @@ val traceDirectory = layout.buildDirectory.get().asFile.resolve("allocation-trac
 
 tasks.named<JavaExec>("run") {
     dependsOn(agentJar)
-    jvmArgs("-javaagent:${agentJarFile()}=dir=$traceDirectory")
+    jvmArgs("-javaagent:${agentJarFile()}=dir=$traceDirectory,warmup=0.1")
 }
 
 /**
@@ -67,8 +67,8 @@ tasks.register<JavaExec>("verifyRun") {
         val output = captured.toString()
         println(output)
 
-        // One row per site in the summary table: code, count, first, last, contract, state, class#method.
-        val states = Regex("(?m)^\\d+\\s+\\d+\\s+[\\d.]+\\s+[\\d.]+\\s+\\S+\\s+(steady|STILL ALLOCATING|VIOLATION|-)\\s+(\\S+)$")
+        // One row per site in the summary table: code, count, warm-up, steady, first, last, contract, state, class#method.
+        val states = Regex("(?m)^\\d+\\s+\\d+\\s+\\d+\\s+\\d+\\s+[\\d.]+\\s+[\\d.]+\\s+\\S+\\s+(steady|STILL ALLOCATING|VIOLATION|warm-up only|-)\\s+(\\S+)$")
             .findAll(output)
             .associate { match -> match.groupValues[2] to match.groupValues[1] }
 

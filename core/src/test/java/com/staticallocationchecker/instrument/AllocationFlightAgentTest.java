@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.staticallocationchecker.TraceFixture;
@@ -90,6 +91,20 @@ class AllocationFlightAgentTest {
         assertEquals(Paths.get("out/run"), AllocationFlightAgent.directoryFrom("x=1,dir=out/run"));
         assertEquals(Paths.get(AllocationFlightAgent.DEFAULT_DIRECTORY), AllocationFlightAgent.directoryFrom(null));
         assertEquals(Paths.get(AllocationFlightAgent.DEFAULT_DIRECTORY), AllocationFlightAgent.directoryFrom("someOption=1"));
+    }
+
+    @Test
+    void warmupIsTheWarmupOptionInSecondsAndZeroWhenAbsent() {
+        assertEquals(500_000_000L, AllocationFlightAgent.warmupNanosFrom("dir=out,warmup=0.5"));
+        assertEquals(2_000_000_000L, AllocationFlightAgent.warmupNanosFrom("warmup=2"));
+        assertEquals(0L, AllocationFlightAgent.warmupNanosFrom("dir=out"));
+        assertEquals(0L, AllocationFlightAgent.warmupNanosFrom(null));
+        assertThrows(IllegalArgumentException.class, () -> AllocationFlightAgent.warmupNanosFrom("warmup=-1"));
+    }
+
+    @Test
+    void theWarmUpOptionDoesNotDisturbTheDirectory() {
+        assertEquals(Paths.get("out/run"), AllocationFlightAgent.directoryFrom("warmup=3,dir=out/run"));
     }
 
     @Test

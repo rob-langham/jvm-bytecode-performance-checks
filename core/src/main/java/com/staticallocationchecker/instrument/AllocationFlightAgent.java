@@ -14,9 +14,11 @@ import java.util.List;
  * Java agent that records every allocation site in the application at class-load time, writing each
  * allocation to an {@link AllocationTrace}.
  *
- * <p>Attach at startup with {@code -javaagent:core-<version>-agent.jar=dir=<trace-directory>}, or to
- * a running VM with the attach API. The trace directory defaults to {@value #DEFAULT_DIRECTORY} in
- * the working directory. It is closed, and its buffers flushed, when the JVM shuts down normally.
+ * <p>Attach at startup with {@code -javaagent:core-<version>-agent.jar=dir=<trace-directory>,warmup=<seconds>},
+ * or to a running VM with the attach API. The trace directory defaults to {@value #DEFAULT_DIRECTORY} in
+ * the working directory. The warm-up period, from the moment the agent starts, is what the report calls
+ * warm-up: allocations in it are expected, and only those after it count as steady state. It is closed,
+ * and its buffers flushed, when the JVM shuts down normally.
  *
  * <p>On attach, classes already loaded are retransformed, since they are exactly the classes a
  * running application has been using.
@@ -41,7 +43,7 @@ public final class AllocationFlightAgent {
     }
 
     private static void install(String args, Instrumentation instrumentation, boolean retransformExisting) {
-        AllocationTrace trace = openTrace(directoryFrom(args));
+        AllocationTrace trace = openTrace(directoryFrom(args), warmupNanosFrom(args));
         AllocationTrace.install(trace);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> closeQuietly(trace), "allocation-trace-close"));
 
@@ -54,19 +56,41 @@ public final class AllocationFlightAgent {
 
     /** The {@code dir=} option of the agent arguments, or the default directory. */
     static Path directoryFrom(String args) {
+        String dir = option(args, "dir");
+        return Paths.get(dir != null ? dir : DEFAULT_DIRECTORY);
+    }
+
+    /**
+     * The {@code warmup=} option, in seconds, as nanoseconds. Zero when absent: then every event is
+     * steady state, and the report says so.
+     */
+    static long warmupNanosFrom(String args) {
+        String seconds = option(args, "warmup");
+        if (seconds == null) {
+            return 0L;
+        }
+        double value = Double.parseDouble(seconds);
+        if (value < 0) {
+            throw new IllegalArgumentException("warmup must not be negative: " + seconds);
+        }
+        return Math.round(value * 1e9);
+    }
+
+    /** The value of {@code name=value} among comma-separated agent options, or null. */
+    private static String option(String args, String name) {
         if (args != null) {
             for (String option : args.split(",")) {
-                if (option.startsWith("dir=")) {
-                    return Paths.get(option.substring("dir=".length()));
+                if (option.startsWith(name + "=")) {
+                    return option.substring(name.length() + 1);
                 }
             }
         }
-        return Paths.get(DEFAULT_DIRECTORY);
+        return null;
     }
 
-    private static AllocationTrace openTrace(Path directory) {
+    private static AllocationTrace openTrace(Path directory, long warmupNanos) {
         try {
-            return AllocationTrace.open(directory);
+            return AllocationTrace.open(directory, warmupNanos);
         } catch (IOException e) {
             throw new UncheckedIOException("cannot open allocation trace in " + directory, e);
         }

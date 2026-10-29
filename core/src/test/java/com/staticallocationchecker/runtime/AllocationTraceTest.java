@@ -43,6 +43,8 @@ class AllocationTraceTest {
 
     @Test
     void eventsComeBackInOrderWithTheirCodesAndTimestamps() throws IOException {
+        // The clock is read once when the trace opens, to set the warm-up boundary, so the first
+        // event is the third reading.
         AtomicLong now = new AtomicLong(100);
         AllocationTrace trace = AllocationTrace.open(dir, now::incrementAndGet);
         trace.record(3);
@@ -53,9 +55,23 @@ class AllocationTraceTest {
         List<long[]> events = readEvents(dir);
         assertEquals(3, events.size());
         assertEquals(3, events.get(0)[0]);
-        assertEquals(101, events.get(0)[1]);
+        assertEquals(102, events.get(0)[1]);
         assertEquals(9, events.get(2)[0]);
-        assertEquals(103, events.get(2)[1]);
+        assertEquals(104, events.get(2)[1]);
+    }
+
+    @Test
+    void theWarmUpBoundaryIsWrittenWhenTheTraceOpens() throws IOException {
+        AllocationTrace trace = AllocationTrace.open(dir, 2_000_000_000L, () -> 1_000L);
+        trace.close();
+
+        assertEquals(java.util.OptionalLong.of(2_000_001_000L), AllocationTraceReader.warmupEnd(dir),
+                "the boundary is the clock at open plus the warm-up");
+    }
+
+    @Test
+    void aTraceWithoutAWarmUpFileHasNoBoundary() throws IOException {
+        assertEquals(java.util.OptionalLong.empty(), AllocationTraceReader.warmupEnd(dir));
     }
 
     @Test

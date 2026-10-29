@@ -48,6 +48,13 @@ public final class AllocationTrace implements Closeable {
     /** The text key file mapping site codes to site keys. */
     public static final String KEYS_FILE = "allocations.keys";
 
+    /**
+     * The warm-up boundary: a single line {@code endNanos=<nanoTime>}. Events stamped before it came
+     * from the warm-up period, and events at or after it are steady state. Written when the trace opens,
+     * so a trace that is cut short still says where its warm-up ended.
+     */
+    public static final String WARMUP_FILE = "warmup.txt";
+
     private static final int BUFFER_RECORDS = 4096;
 
     /** The process-wide trace that instrumented code writes to, or null when none is installed. */
@@ -62,12 +69,15 @@ public final class AllocationTrace implements Closeable {
     private final ThreadLocal<Buffer> local = ThreadLocal.withInitial(this::newBuffer);
     private volatile boolean closed;
 
-    private AllocationTrace(Path directory, LongSupplier clock) throws IOException {
+    private AllocationTrace(Path directory, long warmupNanos, LongSupplier clock) throws IOException {
         this.clock = clock;
         this.events = FileChannel.open(directory.resolve(EVENTS_FILE),
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
         this.keys = Files.newBufferedWriter(directory.resolve(KEYS_FILE), StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+        long endNanos = clock.getAsLong() + warmupNanos;
+        Files.write(directory.resolve(WARMUP_FILE),
+                ("endNanos=" + endNanos + "\n").getBytes(StandardCharsets.UTF_8));
     }
 
     /** Opens a trace in {@code directory}, creating it if needed, timed by {@link System#nanoTime()}. */
@@ -75,10 +85,24 @@ public final class AllocationTrace implements Closeable {
         return open(directory, System::nanoTime);
     }
 
-    /** Opens a trace whose timestamps come from {@code clock}. Intended for tests. */
-    public static AllocationTrace open(Path directory, LongSupplier clock) throws IOException {
+    /**
+     * Opens a trace in {@code directory} whose first {@code warmupNanos} are warm-up. With zero, every
+     * event is steady state.
+     */
+    public static AllocationTrace open(Path directory, long warmupNanos) throws IOException {
         Files.createDirectories(directory);
-        return new AllocationTrace(directory, clock);
+        return new AllocationTrace(directory, warmupNanos, System::nanoTime);
+    }
+
+    /** Opens a trace with no warm-up whose timestamps come from {@code clock}. Intended for tests. */
+    public static AllocationTrace open(Path directory, LongSupplier clock) throws IOException {
+        return open(directory, 0L, clock);
+    }
+
+    /** Opens a trace with a warm-up of {@code warmupNanos} whose timestamps come from {@code clock}. */
+    public static AllocationTrace open(Path directory, long warmupNanos, LongSupplier clock) throws IOException {
+        Files.createDirectories(directory);
+        return new AllocationTrace(directory, warmupNanos, clock);
     }
 
     /** Installs {@code trace} as the destination for instrumented sites (or null to stop recording). */

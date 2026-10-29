@@ -298,7 +298,7 @@ they actually stop happening, attach the agent:
 ```bash
 ./gradlew :core:shadowJar
 
-java -javaagent:core/build/libs/core-0.1.0-agent.jar=dir=build/allocation-trace -jar your-app.jar
+java -javaagent:core/build/libs/core-0.1.0-agent.jar=dir=build/allocation-trace,warmup=30 -jar your-app.jar
 ```
 
 The agent records every allocation site in the application at class-load time, and writes each
@@ -308,9 +308,12 @@ allocation to two files in the trace directory:
 | --- | --- |
 | `allocations.bin` | One 12-byte record per allocation: a 4-byte site code, then an 8-byte timestamp in nanoseconds |
 | `allocations.keys` | One `code<TAB>site` line per site, where the site is `class#method:line@offset:CATEGORY` |
+| `warmup.txt` | The nanoTime at which the warm-up period ends |
 
-The `dir=` option is optional and defaults to `allocation-trace` in the working directory. The trace
-is complete when the JVM exits normally.
+The options are `dir=`, where the trace goes (default `allocation-trace` in the working directory), and
+`warmup=`, the warm-up period in seconds from when the agent starts (default `0`). Allocations during
+warm-up are expected; only those after it are steady state. Choose a warm-up long enough for your
+application's startup to finish. The trace is complete when the JVM exits normally.
 
 Turn the trace into a report with the classes it was recorded from:
 
