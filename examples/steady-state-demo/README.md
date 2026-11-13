@@ -6,8 +6,7 @@ Two hot paths that are statically indistinguishable and behave completely differ
 - `ResizingCache` — lazily allocates a buffer that keeps being outgrown. Guarded, cached, and it
   never stops allocating.
 
-Both pass the static checker with **zero findings**. Only the runtime flight recorder tells them
-apart.
+Both pass the static checker with **zero findings**. Only the runtime trace tells them apart.
 
 ## Run it
 
@@ -17,27 +16,39 @@ apart.
 AGENT=../../core/build/libs/core-0.1.0-SNAPSHOT-agent.jar
 mkdir -p build/classes
 javac -cp $AGENT -d build/classes $(find src -name '*.java')
-java -javaagent:$AGENT -cp build/classes:$AGENT demo.LoadDriver
+
+# 1. Run the load. The agent writes every allocation to build/trace, and treats the first 0.5 s as warm-up.
+java -javaagent:$AGENT=dir=build/trace,warmup=0.5 -cp build/classes:$AGENT demo.LoadDriver
+
+# 2. Report on the trace, reading the classes for their annotations.
+java -cp $AGENT com.staticallocationchecker.trace.TraceReport build/trace build/classes
 ```
 
 ## What you should see
 
+Abridged, from one run:
+
 ```
-round    operations   recorded      new   sites
-1           2000000         36       36   PricingEngine#levels=4  ResizingCache#scratch=32
-2           4000000        127       91   PricingEngine#levels=4  ResizingCache#scratch=123
-...
-8          16000000        204        4   PricingEngine#levels=4  ResizingCache#scratch=200
+Warm-up: ends 425 ms into the run. Only allocations after that are steady state.
+
+By contract:
+  warmup          sites    2  warm-up events         33  steady events         88  still allocating 1  violations 0
+  unannotated     sites   12  warm-up events         17  steady events        116  still allocating 0  violations 0
+
+code       count    warm-up     steady     first ms      last ms  contract        state             site
+12             1          1          0            6            6  warmup          steady            demo.PricingEngine#levels
+13           120         32         88            6         3361  warmup          STILL ALLOCATING  demo.ResizingCache#scratch
 ```
 
-`PricingEngine#levels` stops at 4 after round 1 and never moves again, through 16 million
-operations. `ResizingCache#scratch` is still climbing in round 8.
+`PricingEngine#levels` allocates during warm-up and never again. `ResizingCache#scratch` is still
+allocating after warm-up. The other twelve sites are the driver's own allocations: counted, not judged,
+because nothing annotates them.
 
-(The count of 4 rather than 1 is the four load threads racing through the unsynchronised lazy init —
-another thing the static checker cannot see.)
+The count for `levels` can be more than 1 because the four load threads race through the
+unsynchronised lazy init, which is also during warm-up. That is another thing the static checker
+cannot see.
 
-Exact numbers vary per run; the shape does not.
-
-Without `-javaagent` nothing is instrumented and every count is zero.
+Exact numbers vary per run; the shape does not. Without `-javaagent` nothing is instrumented and no
+trace is written.
 
 The full walkthrough is in the [documentation](https://rob-langham.github.io/jvm-bytecode-performance-checks/runtime/steady-state/).

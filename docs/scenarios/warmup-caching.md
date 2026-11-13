@@ -127,7 +127,7 @@ Accepted, because `n <= 0` skips the body entirely.
 > Be honest about this one. It allocates `n` times per call, and the checker passes it. "Some path
 > skips it" is a weak guarantee when the path that does not skip it runs a thousand times. **If a
 > warmup method contains a loop, the static result is weak evidence** — verify it with the
-> [runtime recorder](../runtime/steady-state.md).
+> [runtime trace](../runtime/steady-state.md).
 
 ### A ternary
 

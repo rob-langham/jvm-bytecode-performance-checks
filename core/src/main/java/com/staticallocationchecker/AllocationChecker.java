@@ -132,30 +132,77 @@ public final class AllocationChecker {
         }
 
         for (ClassNode classNode : analysisIndex.values()) {
-            boolean typeLevel = hasAnnotation(classNode.visibleAnnotations, ZERO_ALLOCATIONS);
             for (MethodNode method : classNode.methods) {
-                boolean zeroAllocations =
-                        typeLevel || hasAnnotation(method.visibleAnnotations, ZERO_ALLOCATIONS);
-                if (declaresBothContracts(method)) {
-                    // Both annotations on one declaration is a contradiction. Resolving it by
-                    // precedence would silently discard whichever contract lost, so say so instead.
-                    findings.add(new Finding(
-                            Finding.Kind.CONFLICTING_CONTRACTS,
-                            Type.getObjectType(classNode.name).getClassName(),
-                            method.name, method.desc, -1, null,
-                            Collections.singletonList(signature(classNode, method))));
-                } else if (isWarmup(classNode, method)) {
-                    analyzeWarmupMethod(classNode, method, index, findings);
-                } else if (zeroAllocations) {
-                    walkEntry(classNode, method, index, hierarchy, findings);
-                } else if (inherits(hierarchy, classNode, method, ALLOCATIONS_FOR_WARMUP)) {
-                    analyzeWarmupMethod(classNode, method, index, findings);
-                } else if (inherits(hierarchy, classNode, method, ZERO_ALLOCATIONS)) {
-                    walkEntry(classNode, method, index, hierarchy, findings);
+                switch (contractOf(hierarchy, classNode, method)) {
+                    case CONFLICTING:
+                        // Both annotations on one declaration is a contradiction. Resolving it by
+                        // precedence would silently discard whichever contract lost, so say so instead.
+                        findings.add(new Finding(
+                                Finding.Kind.CONFLICTING_CONTRACTS,
+                                Type.getObjectType(classNode.name).getClassName(),
+                                method.name, method.desc, -1, null,
+                                Collections.singletonList(signature(classNode, method))));
+                        break;
+                    case WARMUP:
+                        analyzeWarmupMethod(classNode, method, index, findings);
+                        break;
+                    case ZERO_ALLOCATIONS:
+                        walkEntry(classNode, method, index, hierarchy, findings);
+                        break;
+                    default:
+                        break;
                 }
             }
         }
         return new Report(findings);
+    }
+
+    /**
+     * The contract every method in {@code analysisRoots} is held to, resolved exactly as
+     * {@link #analyze(List, List)} resolves it - declared, type-level or inherited.
+     *
+     * <p>For the runtime report, which needs to know what a recorded allocation site was promised
+     * without re-deriving the rules and risking a different answer.
+     *
+     * @return the contract for each method, keyed by {@code binary.ClassName#method(descriptor)}
+     */
+    public Map<String, Contract> contracts(List<Path> analysisRoots, List<Path> resolveClasspath) {
+        Map<String, ClassNode> analysisIndex = buildIndex(analysisRoots);
+        Map<String, ClassNode> index = new HashMap<>(buildIndex(resolveClasspath));
+        index.putAll(analysisIndex);
+        ClassHierarchy hierarchy = new ClassHierarchy(index);
+
+        Map<String, Contract> contracts = new HashMap<>();
+        for (ClassNode classNode : analysisIndex.values()) {
+            for (MethodNode method : classNode.methods) {
+                contracts.put(signature(classNode, method), contractOf(hierarchy, classNode, method));
+            }
+        }
+        return contracts;
+    }
+
+    /**
+     * The one place a method's contract is decided, so that {@link #analyze} and {@link #contracts}
+     * cannot disagree. A declaration always beats an inherited contract.
+     */
+    private static Contract contractOf(ClassHierarchy hierarchy, ClassNode classNode, MethodNode method) {
+        if (declaresBothContracts(method)) {
+            return Contract.CONFLICTING;
+        }
+        if (isWarmup(classNode, method)) {
+            return Contract.WARMUP;
+        }
+        if (hasAnnotation(classNode.visibleAnnotations, ZERO_ALLOCATIONS)
+                || hasAnnotation(method.visibleAnnotations, ZERO_ALLOCATIONS)) {
+            return Contract.ZERO_ALLOCATIONS;
+        }
+        if (inherits(hierarchy, classNode, method, ALLOCATIONS_FOR_WARMUP)) {
+            return Contract.WARMUP;
+        }
+        if (inherits(hierarchy, classNode, method, ZERO_ALLOCATIONS)) {
+            return Contract.ZERO_ALLOCATIONS;
+        }
+        return Contract.NONE;
     }
 
     /**

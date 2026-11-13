@@ -48,8 +48,8 @@ final class Instrumentation {
 
     /**
      * Loads {@code type} from the given (instrumented) bytes in a fresh classloader that defines
-     * only that class and delegates everything else (recorder, annotations) to the parent, so the
-     * instrumented code and the test observe the same recorder.
+     * only that class and delegates everything else (trace, annotations) to the parent, so the
+     * instrumented code and the test observe the same trace.
      */
     static Class<?> defineInstrumented(Class<?> type, byte[] bytes) throws ClassNotFoundException {
         return new SingleClassLoader(type.getClassLoader(), type.getName(), bytes).loadClass(type.getName());

@@ -51,7 +51,7 @@ subprojects {
 
 val moduleDescriptions = mapOf(
     "core" to "Static bytecode analysis enforcing zero-allocation contracts on JVM hot paths, "
-        + "with a runtime allocation flight recorder exposed over JMX.",
+        + "with a runtime allocation trace written to a binary file and reported on afterwards.",
     "gradle-plugin" to "Gradle plugin for the JVM static allocation checker.",
     "maven-plugin" to "Maven plugin for the JVM static allocation checker.",
 )

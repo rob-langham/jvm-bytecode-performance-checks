@@ -6,7 +6,7 @@ transitively — failing the build on any heap allocation it finds.
 
 Built on [ASM](https://asm.ow2.io/). The library and the agent run on Java 8+ and analyse
 bytecode compiled for Java 8, 11, 17, 21 or 25, so a `--release 8` build can declare the
-contracts and a legacy JDK 8 production JVM can carry the flight recorder. The Gradle and Maven
+contracts and a legacy JDK 8 production JVM can carry the runtime trace. The Gradle and Maven
 plugins are the exception: they need a build running on Java 17+. Apache 2.0.
 
 ### 📖 **[Read the documentation →](https://rob-langham.github.io/jvm-bytecode-performance-checks/)**
@@ -37,7 +37,7 @@ anywhere it can reach. `@AllocationsForWarmup` marks the lazy-init that *is* all
 and checks it is genuinely guarded and cached.
 
 For what it catches, how it follows calls through interfaces and inherited methods, and the runtime
-flight recorder that finds what static analysis structurally cannot —
+runtime trace that finds what static analysis structurally cannot —
 [read the docs](https://rob-langham.github.io/jvm-bytecode-performance-checks/).
 
 ## Getting started
@@ -50,14 +50,14 @@ Or run the demos, which need nothing published:
 
 ```bash
 ./gradlew -p demo demo                                  # every scenario, findings side by side
-./gradlew -p demo :07-runtime-flight-recorder:run       # the runtime recorder, under load
+./gradlew -p demo :07-runtime-flight-recorder:verifyRun  # the runtime trace, under load
 ```
 
 ## What's in this repository
 
 | | |
 | --- | --- |
-| [`core/`](core) | The analyser, the annotations, the java agent and the flight recorder |
+| [`core/`](core) | The analyser, the annotations, the java agent and the runtime trace |
 | [`gradle-plugin/`](gradle-plugin) | `checkStaticAllocation`, wired into `check` |
 | [`maven-plugin/`](maven-plugin) | The `check` goal, bound to `verify` |
 | [`demo/`](demo) | A runnable scenario per capability — a standalone build, not in this one's reactor |

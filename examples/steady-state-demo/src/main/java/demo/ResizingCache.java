@@ -11,7 +11,7 @@ import com.staticallocationchecker.annotations.ZeroAllocations;
  * there is to see. Whether the guard stops being taken depends on the values the method is called
  * with, and a workload whose request sizes keep growing past the buffer reallocates forever.
  *
- * <p>This is the class of bug the runtime recorder exists to find: a site whose count keeps
+ * <p>This is the class of bug the runtime trace exists to find: a site whose count keeps
  * climbing after warmup should have finished.
  */
 public final class ResizingCache {

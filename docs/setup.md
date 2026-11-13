@@ -15,8 +15,8 @@ nav_order: 2
 ## Requirements
 
 - **Java 8 or later to run the checker or the agent.** The `core` jar — analyser, classifier,
-  runtime recorder and agent alike — is compiled at `--release 8`, so it runs on a JDK 8 build
-  host and the flight recorder attaches to a legacy JDK 8 production JVM. The code it checks can
+  runtime trace and agent alike — is compiled at `--release 8`, so it runs on a JDK 8 build
+  host and the runtime agent attaches to a legacy JDK 8 production JVM. The code it checks can
   be just as old or much newer: bytecode compiled for Java 8, 11, 17, 21 and 25 is supported — the
   policy is 8, 11, and then every LTS. The hard ceiling is whatever class-file version the bundled
   ASM (currently 9.10.1) understands; a class file newer than that fails the build with a message
@@ -56,7 +56,7 @@ That produces three things you might want:
 | Artifact | Path | What it is |
 | --- | --- | --- |
 | Library jar | `core/build/libs/core-0.1.0.jar` | Annotations and the analyser API. A thin jar — ASM is a normal transitive dependency. |
-| Agent jar | `core/build/libs/core-0.1.0-agent.jar` | The `-javaagent` flight recorder, with ASM shaded in. Self-contained. |
+| Agent jar | `core/build/libs/core-0.1.0-agent.jar` | The `-javaagent` runtime trace, with ASM shaded in. Self-contained. |
 | Plugins | `gradle-plugin/`, `maven-plugin/` | Build integrations. |
 
 ## Step 1: depend on the annotations
@@ -290,7 +290,7 @@ release whose versioned entries will actually be loaded.
 > at the modules your hot path actually calls into, and expect JDK calls to stay unresolved
 > regardless.
 
-## Step 4 (optional): the runtime flight recorder
+## Step 4 (optional): the runtime trace
 
 Static analysis proves your warmup allocations *can* only happen on a guarded path. To see whether
 they actually stop happening, attach the agent:
@@ -298,27 +298,51 @@ they actually stop happening, attach the agent:
 ```bash
 ./gradlew :core:shadowJar
 
-java -javaagent:core/build/libs/core-0.1.0-agent.jar -jar your-app.jar
+java -javaagent:core/build/libs/core-0.1.0-agent.jar=dir=build/allocation-trace,warmup=30 -jar your-app.jar
 ```
 
-The agent instruments `@AllocationsForWarmup` methods at class-load time and registers an MXBean
-under `com.staticallocationchecker:type=AllocationFlightRecorder`, exposing:
+The agent records every allocation site in the application at class-load time, and writes each
+allocation to two files in the trace directory:
 
-| Attribute | Meaning |
+| File | Contents |
 | --- | --- |
-| `TotalAllocations` | Total allocations recorded across all warmup sites |
-| `Sites` | Per-site `count`, `firstSeenMillis`, `lastSeenMillis` |
-| `reset()` | Clears all recorded sites |
+| `allocations.bin` | One 12-byte record per allocation: a 4-byte site code, then an 8-byte timestamp in milliseconds since the Unix epoch |
+| `allocations.keys` | One `code<TAB>site` line per site, where the site is `class#method:line@offset:CATEGORY` |
+| `warmup.txt` | The Unix epoch milliseconds at which the warm-up period ends |
 
-Connect with JConsole, VisualVM, or any JMX client. To read it from inside the process, call
-`AllocationFlightRecorder.instance().snapshot()`.
+The options are `dir=`, where the trace goes (default `allocation-trace` in the working directory), and
+`warmup=`, the warm-up period in seconds from when the agent starts (default `0`). Allocations during
+warm-up are expected; only those after it are steady state. Choose a warm-up long enough for your
+application's startup to finish. The trace is complete when the JVM exits normally.
+
+Turn the trace into a report with the classes it was recorded from:
+
+```bash
+java -cp core/build/libs/core-0.1.0.jar com.staticallocationchecker.trace.TraceReport \
+     build/allocation-trace target/classes
+```
+
+The report gives each site's count, first and last time, and the contract that governs it. The
+contract comes from the `@AllocationsForWarmup` and `@ZeroAllocations` annotations in the bytecode, and
+it decides how a site is judged:
+
+| Contract | Judgement |
+| --- | --- |
+| `warmup` | `steady`, or `STILL ALLOCATING` if it fires near the end of the run |
+| `zero-allocation` | `VIOLATION` if it fires at all |
+| `conflicting` | Both annotations on one method. Counted, not judged: the checker reports it |
+| `unannotated` | Counted, not judged |
+| `unknown` | Its class or method was not in the directories given, or its overload could not be told apart |
+
+The contract is resolved by the static checker itself, so a site is held to exactly what the checker
+holds its method to, including a contract inherited from an annotated interface or superclass.
 
 {: .note }
 > Use the **agent** jar, not the library jar. A `-javaagent` jar is appended to the system class
 > path with nothing beside it, so it has to be self-contained. The library jar deliberately declares
 > no agent entry points, because it cannot honour them.
 
-The full walkthrough, including what the numbers look like under sustained load, is in
+The full walkthrough, including what the report looks like under sustained load, is in
 [Warmup under load](runtime/steady-state.md).
 
 ## Verifying the setup

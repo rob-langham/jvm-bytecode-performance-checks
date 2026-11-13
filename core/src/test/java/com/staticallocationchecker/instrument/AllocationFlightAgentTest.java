@@ -5,99 +5,125 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.staticallocationchecker.instrument.fixtures.NotWarmup;
+import com.staticallocationchecker.TraceFixture;
+import com.staticallocationchecker.instrument.fixtures.WarmupWithoutAllocation;
 import com.staticallocationchecker.instrument.fixtures.WarmupTarget;
-import com.staticallocationchecker.runtime.AllocationFlightRecorder;
+import com.staticallocationchecker.runtime.AllocationTrace;
 import java.lang.instrument.ClassFileTransformer;
-import java.lang.management.ManagementFactory;
 import java.lang.reflect.Proxy;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
-import javax.management.ObjectName;
-import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class AllocationFlightAgentTest {
 
-    @Test
-    void transformerInstrumentsOnlyWarmupClasses() {
-        WarmupClassFileTransformer transformer = new WarmupClassFileTransformer();
-        ClassLoader loader = getClass().getClassLoader();
+    @TempDir
+    Path dir;
 
-        byte[] warmup = transformer.transform(loader,
-                "com/staticallocationchecker/instrument/fixtures/WarmupTarget",
-                null, null, originalBytes(WarmupTarget.class));
-        byte[] plain = transformer.transform(loader,
-                "com/staticallocationchecker/instrument/fixtures/NotWarmup",
-                null, null, originalBytes(NotWarmup.class));
+    private TraceFixture trace;
 
-        assertNotNull(warmup, "warmup class should be instrumented");
-        assertNull(plain, "non-warmup class should be returned unchanged (null)");
+    @BeforeEach
+    void installTrace() throws Exception {
+        trace = new TraceFixture(dir);
+    }
+
+    @AfterEach
+    void closeTrace() throws Exception {
+        trace.close();
     }
 
     @Test
-    void premainRegistersTransformerAndMBean() throws Exception {
-        List<ClassFileTransformer> added = new ArrayList<>();
-        java.lang.instrument.Instrumentation inst = fakeInstrumentation(added);
+    void transformerInstrumentsAnyClassThatAllocates() {
+        AllocationClassFileTransformer transformer = new AllocationClassFileTransformer(trace.trace());
+        ClassLoader loader = getClass().getClassLoader();
 
+        byte[] warmup = transformer.transform(loader,
+                "demo/WarmupTarget",
+                null, null, originalBytes(WarmupTarget.class));
+        byte[] plain = transformer.transform(loader,
+                "demo/WarmupWithoutAllocation",
+                null, null, originalBytes(WarmupWithoutAllocation.class));
+
+        assertNotNull(warmup, "a class with allocation sites should be instrumented");
+        assertNull(plain, "a class with no allocation sites should be returned unchanged (null)");
+    }
+
+    @Test
+    void premainInstallsOneTransformerAndOpensTheTraceInTheGivenDirectory() throws Exception {
+        List<ClassFileTransformer> added = new ArrayList<>();
         try {
-            AllocationFlightAgent.premain("", inst);
+            AllocationFlightAgent.premain("dir=" + dir.resolve("run"), fakeInstrumentation(added));
 
             assertEquals(1, added.size(), "premain should install one transformer");
-            assertTrue(ManagementFactory.getPlatformMBeanServer()
-                    .isRegistered(new ObjectName(AllocationFlightRecorder.OBJECT_NAME)), "MBean registered");
+            assertTrue(java.nio.file.Files.isRegularFile(dir.resolve("run").resolve(AllocationTrace.EVENTS_FILE)),
+                    "the events file should be created in the directory the agent was given");
+            assertTrue(java.nio.file.Files.isRegularFile(dir.resolve("run").resolve(AllocationTrace.KEYS_FILE)),
+                    "the keys file should be created in the directory the agent was given");
         } finally {
-            AllocationFlightRecorder.unregister();
+            AllocationTrace.instance().close();
+            AllocationTrace.install(null);
         }
     }
 
     @Test
     void agentmainInstallsTheSameMachineryAsPremain() throws Exception {
         List<ClassFileTransformer> added = new ArrayList<>();
-
         try {
-            AllocationFlightAgent.agentmain("", fakeInstrumentation(added));
+            AllocationFlightAgent.agentmain("dir=" + dir.resolve("attached"), fakeInstrumentation(added));
 
             assertEquals(1, added.size(), "dynamic attach should install the transformer too");
-            assertTrue(ManagementFactory.getPlatformMBeanServer()
-                    .isRegistered(new ObjectName(AllocationFlightRecorder.OBJECT_NAME)), "MBean registered");
         } finally {
-            AllocationFlightRecorder.unregister();
+            AllocationTrace.instance().close();
+            AllocationTrace.install(null);
         }
     }
 
     @Test
-    void premainToleratesNullAndNonEmptyArgumentStrings() {
-        List<ClassFileTransformer> added = new ArrayList<>();
-        try {
-            AllocationFlightAgent.premain(null, fakeInstrumentation(added));
-            AllocationFlightAgent.premain("someOption=1", fakeInstrumentation(added));
-
-            assertEquals(2, added.size());
-        } finally {
-            AllocationFlightRecorder.unregister();
-        }
+    void directoryIsTheDirOptionOrTheDefault() {
+        assertEquals(Paths.get("out/run"), AllocationFlightAgent.directoryFrom("x=1,dir=out/run"));
+        assertEquals(Paths.get(AllocationFlightAgent.DEFAULT_DIRECTORY), AllocationFlightAgent.directoryFrom(null));
+        assertEquals(Paths.get(AllocationFlightAgent.DEFAULT_DIRECTORY), AllocationFlightAgent.directoryFrom("someOption=1"));
     }
 
     @Test
-void agentmainRetransformsAlreadyLoadedWarmupClasses() throws Exception {
+    void warmupIsTheWarmupOptionInSecondsAndZeroWhenAbsent() {
+        assertEquals(500L, AllocationFlightAgent.warmupMillisFrom("dir=out,warmup=0.5"));
+        assertEquals(2_000L, AllocationFlightAgent.warmupMillisFrom("warmup=2"));
+        assertEquals(0L, AllocationFlightAgent.warmupMillisFrom("dir=out"));
+        assertEquals(0L, AllocationFlightAgent.warmupMillisFrom(null));
+        assertThrows(IllegalArgumentException.class, () -> AllocationFlightAgent.warmupMillisFrom("warmup=-1"));
+    }
+
+    @Test
+    void theWarmUpOptionDoesNotDisturbTheDirectory() {
+        assertEquals(Paths.get("out/run"), AllocationFlightAgent.directoryFrom("warmup=3,dir=out/run"));
+    }
+
+    @Test
+    void agentmainRetransformsAlreadyLoadedApplicationClasses() throws Exception {
         List<ClassFileTransformer> added = new ArrayList<>();
         List<String> retransformed = new ArrayList<>();
-        java.lang.instrument.Instrumentation inst = recordingInstrumentation(added, retransformed);
-
         try {
-            AllocationFlightAgent.agentmain("", inst);
+            AllocationFlightAgent.agentmain("dir=" + dir.resolve("attached"),
+                    recordingInstrumentation(added, retransformed));
 
             assertFalse(retransformed.isEmpty(),
-                    "already-loaded warmup classes should be retransformed on attach");
+                    "already-loaded application classes should be retransformed on attach");
         } finally {
-            AllocationFlightRecorder.unregister();
+            AllocationTrace.instance().close();
+            AllocationTrace.install(null);
         }
     }
 
-    /** An {@code Instrumentation} that reports one already-loaded warmup class. */
+    /** An {@code Instrumentation} that reports one already-loaded application class. */
     private java.lang.instrument.Instrumentation recordingInstrumentation(
             List<ClassFileTransformer> added, List<String> retransformed) {
         return (java.lang.instrument.Instrumentation) Proxy.newProxyInstance(
@@ -109,11 +135,12 @@ void agentmainRetransformsAlreadyLoadedWarmupClasses() throws Exception {
                             added.add((ClassFileTransformer) args[0]);
                             return null;
                         case "getAllLoadedClasses":
-                            return new Class<?>[] {WarmupTarget.class};
+                            return new Class<?>[] {org.junit.jupiter.api.Assertions.class};
                         case "isModifiableClass":
                         case "isRetransformClassesSupported":
                             return true;
                         case "retransformClasses":
+                            // Varargs: the proxy receives the array, even for a single class.
                             for (Class<?> c : (Class<?>[]) args[0]) {
                                 retransformed.add(c.getName());
                             }
